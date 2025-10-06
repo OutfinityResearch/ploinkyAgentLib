@@ -6,7 +6,9 @@ import { ensureProvider } from './models/providerRegistry.mjs';
 const modelsConfiguration = loadModelsConfiguration();
 
 registerBuiltInProviders();
-await registerProvidersFromConfig(modelsConfiguration);
+const providersReady = (async () => {
+    await registerProvidersFromConfig(modelsConfiguration);
+})();
 
 const llmCalls = [];
 
@@ -44,6 +46,8 @@ export async function callLLM(historyArray, prompt, options = {}) {
 }
 
 async function callLLMWithModelInternal(modelName, historyArray, prompt, invocationOptions = {}) {
+    await providersReady;
+
     const controller = new AbortController();
     llmCalls.push(controller);
 
