@@ -14,7 +14,18 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "*.mjs",
+    "agents",
+    "context",
+    "invocation",
+    "models",
+    "operators",
+    "search",
+    "skills",
+    "tasks",
+    "utils",
+    "src"
   ],
   "scripts": {
     "build": "npm run build:esm && npm run build:cjs",
