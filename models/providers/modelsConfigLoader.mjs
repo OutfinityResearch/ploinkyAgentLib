@@ -2,12 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const moduleFilename = typeof __filename === 'string'
-    ? __filename
-    : fileURLToPath(import.meta.url);
-const moduleDirname = typeof __dirname === 'string'
-    ? __dirname
-    : path.dirname(moduleFilename);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export const DEFAULT_PROVIDER_ENV_MAP = {
     openai: 'OPENAI_API_KEY',
@@ -21,7 +17,7 @@ export const DEFAULT_PROVIDER_ENV_MAP = {
 
 const VALID_MODES = new Set(['fast', 'deep']);
 
-export function loadRawConfig(configPath = path.join(moduleDirname, 'models.json')) {
+export function loadRawConfig(configPath = path.join(__dirname, 'models.json')) {
     if (!fs.existsSync(configPath)) {
         return { raw: { providers: {}, models: {} }, issues: { errors: [`models.json not found at ${configPath}`], warnings: [] } };
     }
