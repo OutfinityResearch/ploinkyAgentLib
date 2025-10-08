@@ -30,6 +30,7 @@ import {
 import { invokeAgent } from './invocation/modelInvoker.mjs';
 import { safeJsonParse } from './utils/json.mjs';
 import { callOperator, chooseOperator, registerOperator, resetOperatorRegistry } from './operators/operatorRegistry.mjs';
+import { startTyping, stopTyping } from './utils/typingIndicator.mjs';
 
 let agentLibraryInstance = null;
 
@@ -97,105 +98,95 @@ class Agent {
     }
 
     async rankSkill(taskDescription, options = {}) {
-        const providedRole = typeof options.role === 'string' && options.role.trim()
-            ? options.role.trim()
-            : (typeof options.callerRole === 'string' && options.callerRole.trim()
-                ? options.callerRole.trim()
-                : '');
+        // Support both single role and array of roles
+        let roles = [];
+        
+        if (Array.isArray(options.roles) && options.roles.length > 0) {
+            roles = options.roles;
+        } else {
+            const providedRole = typeof options.role === 'string' && options.role.trim()
+                ? options.role.trim()
+                : (typeof options.callerRole === 'string' && options.callerRole.trim()
+                    ? options.callerRole.trim()
+                    : '');
+            
+            if (providedRole) {
+                roles = [providedRole];
+            }
+        }
 
-        if (!providedRole) {
+        if (!roles.length) {
             throw new Error('Agent rankSkill requires a role for access control.');
         }
 
         const verboseMode = options.verbose === true;
         const startTime = options.startTime || Date.now();
         
-        // Progressive display delay (configurable via env var, default 150ms)
-        const progressiveDelay = process.env.LLMAgentClient_VERBOSE_DELAY 
-            ? parseInt(process.env.LLMAgentClient_VERBOSE_DELAY, 10)
-            : 150;
-        const useProgressiveDisplay = verboseMode && progressiveDelay > 0;
-        
-        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+        // Show typing indicator during search
+        if (verboseMode) {
+            startTyping();
+        }
         
         const flexSearchStart = Date.now();
-        const registryOptions = { ...options, role: providedRole };
-        const matches = this.skillRegistry.rankSkill(taskDescription, registryOptions);
+        const registryOptions = { ...options, roles, includeScores: true };
+        const rawMatches = this.skillRegistry.rankSkill(taskDescription, registryOptions);
 
-        if (!Array.isArray(matches) || matches.length === 0) {
+        const matches = Array.isArray(rawMatches)
+            ? rawMatches.map((entry) => {
+                if (entry && typeof entry === 'object' && typeof entry.name === 'string') {
+                    return { name: entry.name, score: typeof entry.score === 'number' ? entry.score : null };
+                }
+                if (typeof entry === 'string') {
+                    return { name: entry, score: null };
+                }
+                return null;
+            }).filter(Boolean)
+            : [];
+
+        if (!matches.length) {
             if (verboseMode) {
-                const flexSearchTime = Date.now() - flexSearchStart;
-                console.log(`[FlexSearch] No matches found (${flexSearchTime}ms)`);
+                stopTyping();
             }
             throw new Error('No skills matched the provided task description.');
         }
 
-        if (verboseMode) {
-            const flexSearchTime = Date.now() - flexSearchStart;
-            console.log(`\n[FlexSearch] Found ${matches.length} candidate${matches.length > 1 ? 's' : ''} (${flexSearchTime}ms):\n`);
-            
-            if (useProgressiveDisplay) {
-                // Display candidates progressively with delays
-                for (let index = 0; index < matches.length; index++) {
-                    const name = matches[index];
-                    const skill = this.getSkill(name);
-                    const desc = skill?.description || skill?.what || 'No description';
-                    const truncated = desc.length > 70 ? desc.slice(0, 67) + '...' : desc;
-                    console.log(`  ${name}`);
-                    console.log(`  ${truncated}\n`);
-                    
-                    // Add delay between candidates (but not after the last one)
-                    if (index < matches.length - 1) {
-                        await delay(progressiveDelay);
-                    }
-                }
-            } else {
-                // Display all at once (instant)
-                matches.forEach((name, index) => {
-                    const skill = this.getSkill(name);
-                    const desc = skill?.description || skill?.what || 'No description';
-                    const truncated = desc.length > 70 ? desc.slice(0, 67) + '...' : desc;
-                    console.log(`  ${name}`);
-                    console.log(`  ${truncated}\n`);
-                });
-            }
-        }
-
         if (matches.length === 1) {
             if (verboseMode) {
-                console.log(`[Result] Single match found, using: ${matches[0]}`);
+                stopTyping();
             }
-            return matches[0];
+            return matches[0].name;
         }
 
         const normalizeName = (value) => typeof value === 'string' ? value.trim().toLowerCase() : '';
 
-        const candidates = matches.map(name => {
-            const skill = this.getSkill(name);
+        const candidates = matches.map(entry => {
+            const skill = this.getSkill(entry.name);
             if (!skill) {
                 return null;
             }
-            const canonical = normalizeName(skill.name || name);
+            const canonical = normalizeName(skill.name || entry.name);
             return {
                 canonical,
-                name: skill.name || name,
+                name: skill.name || entry.name,
                 spec: skill,
+                score: entry.score,
             };
         }).filter(Boolean);
 
         if (!candidates.length) {
+            if (verboseMode) {
+                stopTyping();
+            }
             throw new Error('Unable to load candidate skill specifications for selection.');
-        }
-
-        if (verboseMode) {
-            console.log(`\n[LLM] Analyzing context to select best match...`);
-            console.log(`[LLM] Evaluating ${candidates.length} candidates`);
         }
 
         let selectorAgent;
         try {
             selectorAgent = getAgent(options?.agentName);
         } catch (error) {
+            if (verboseMode) {
+                stopTyping();
+            }
             throw new Error(`Unable to obtain language model for skill selection: ${error.message}`);
         }
 
@@ -209,6 +200,7 @@ class Agent {
             arguments: entry.spec.arguments,
             requiredArguments: entry.spec.requiredArguments,
             roles: entry.spec.roles,
+            score: entry.score,
         }));
 
         const contextPayload = {
@@ -227,13 +219,12 @@ class Agent {
         const raw = await invokeAgent(selectorAgent, history, { mode: selectionMode });
         
         if (verboseMode) {
-            const llmTime = Date.now() - llmStart;
-            console.log(`[LLM] Selection completed (${llmTime}ms)`);
+            stopTyping();
         }
 
         const candidateMap = new Map();
         for (const candidate of candidates) {
-            candidateMap.set(candidate.canonical, candidate.name);
+            candidateMap.set(candidate.canonical, candidate);
         }
 
         const parseSelection = (value) => {
@@ -251,7 +242,7 @@ class Agent {
                 const trimmed = raw.trim();
                 const normalized = normalizeName(trimmed);
                 if (candidateMap.has(normalized)) {
-                    selected = candidateMap.get(normalized);
+                    selected = candidateMap.get(normalized)?.name;
                 }
             }
         }
@@ -269,11 +260,7 @@ class Agent {
             throw new Error(`Selected skill "${selected}" was not among the matched candidates.`);
         }
 
-        const finalSkill = candidateMap.get(normalizedSelected);
-        
-        if (verboseMode) {
-            console.log(`[Result] LLM selected: ${finalSkill}`);
-        }
+        const finalSkill = candidateMap.get(normalizedSelected).name;
 
         return finalSkill;
     }
@@ -491,3 +478,12 @@ export {
 };
 
 export const __resetForTests = resetForTests;
+
+// Export feedback control utilities
+export { 
+    AgentConfig,
+    createSilentAgent,
+    createVerboseAgent,
+    createConfiguredAgent,
+    setGlobalFeedback,
+} from './AgentConfig.mjs';

@@ -155,38 +155,58 @@ function toSearchableText(value) {
     return String(value);
 }
 
-function normalizeSearchResults(result) {
+function normalizeSearchResults(result, { includeScores = false } = {}) {
     if (!result) {
         return [];
     }
-    if (Array.isArray(result)) {
-        return result.map(entry => {
-            if (typeof entry === 'string') {
-                return entry;
-            }
-            if (entry && typeof entry === 'object') {
-                if (typeof entry.id === 'string') {
-                    return entry.id;
-                }
-                if (typeof entry.doc === 'string') {
-                    return entry.doc;
-                }
-                if (typeof entry.key === 'string') {
-                    return entry.key;
-                }
-            }
-            return null;
-        }).filter(Boolean);
-    }
-    if (typeof result === 'object') {
-        if (Array.isArray(result.result)) {
-            return normalizeSearchResults(result.result);
+
+    const output = [];
+
+    const pushResult = (id, score = null) => {
+        if (typeof id !== 'string' || !id) {
+            return;
         }
-        if (Array.isArray(result.ids)) {
-            return result.ids.filter(id => typeof id === 'string');
+        if (includeScores) {
+            output.push({ id, score: typeof score === 'number' ? score : null });
+        } else {
+            output.push(id);
         }
-    }
-    return [];
+    };
+
+    const walk = (value) => {
+        if (!value) {
+            return;
+        }
+        if (Array.isArray(value)) {
+            value.forEach(walk);
+            return;
+        }
+        if (typeof value === 'string') {
+            pushResult(value);
+            return;
+        }
+        if (typeof value === 'object') {
+            if (Array.isArray(value.result)) {
+                walk(value.result);
+                return;
+            }
+            if (Array.isArray(value.ids)) {
+                value.ids.forEach((id) => pushResult(id));
+                return;
+            }
+            const id = typeof value.id === 'string'
+                ? value.id
+                : (typeof value.doc === 'string'
+                    ? value.doc
+                    : (typeof value.key === 'string' ? value.key : null));
+            if (id) {
+                pushResult(id, value.score);
+            }
+        }
+    };
+
+    walk(result);
+    return output;
 }
 
 function buildSearchText(skill) {
@@ -394,20 +414,37 @@ export default class SkillRegistry {
             return [];
         }
 
-        const normalizedRole = typeof options.role === 'string' && options.role.trim()
-            ? options.role.trim().toLowerCase()
-            : (typeof options.callerRole === 'string' && options.callerRole.trim()
-                ? options.callerRole.trim().toLowerCase()
-                : '');
+        // Support both single role and array of roles
+        let normalizedRoles = [];
 
-        if (!normalizedRole) {
+        if (Array.isArray(options.roles) && options.roles.length > 0) {
+            // Multiple roles provided
+            normalizedRoles = options.roles
+                .map(r => typeof r === 'string' ? r.trim().toLowerCase() : '')
+                .filter(Boolean);
+        } else {
+            // Single role provided (backward compatibility)
+            const normalizedRole = typeof options.role === 'string' && options.role.trim()
+                ? options.role.trim().toLowerCase()
+                : (typeof options.callerRole === 'string' && options.callerRole.trim()
+                    ? options.callerRole.trim().toLowerCase()
+                    : '');
+
+            if (normalizedRole) {
+                normalizedRoles = [normalizedRole];
+            }
+        }
+
+        if (!normalizedRoles.length) {
             throw new Error('rankSkill requires a caller role for access filtering.');
         }
 
         const limit = Number.isInteger(options.limit) && options.limit > 0 ? options.limit : options.limit === 0 ? 0 : 5;
+        const includeScores = options.includeScores === true;
         const searchOptions = {
             bool: options?.bool === 'and' ? 'and' : 'or',
             suggest: true,
+            ...(includeScores ? { enrich: true } : {}),
             ...(limit ? { limit } : {}),
         };
 
@@ -417,26 +454,48 @@ export default class SkillRegistry {
         } catch (error) {
             return [];
         }
-        const matches = normalizeSearchResults(rawResults);
+        const matches = normalizeSearchResults(rawResults, { includeScores });
         if (!matches.length) {
             return [];
         }
         const seen = new Set();
         const filtered = [];
-        for (const key of matches) {
+        for (const entry of matches) {
+            const key = includeScores ? entry?.id : entry;
             const canonical = normalizeSkillName(key);
             if (!canonical || seen.has(canonical)) {
                 continue;
             }
             if (this.skills.has(canonical)) {
                 const record = this.skills.get(canonical);
-                if (Array.isArray(record.roles) && record.roles.includes(normalizedRole)) {
+                // Check if user has any of the required roles for this skill
+                const hasAccess = Array.isArray(record.roles) && 
+                    normalizedRoles.some(userRole => record.roles.includes(userRole));
+
+                if (hasAccess) {
                     seen.add(canonical);
-                    filtered.push(record.name);
+                    if (includeScores) {
+                        filtered.push({
+                            name: record.name,
+                            score: typeof entry?.score === 'number' ? entry.score : null,
+                        });
+                    } else {
+                        filtered.push(record.name);
+                    }
                 }
             }
             if (limit && filtered.length >= limit) {
                 break;
+            }
+        }
+        if (includeScores && filtered.length) {
+            const hasNumericScore = filtered.some(item => typeof item.score === 'number' && Number.isFinite(item.score));
+            if (!hasNumericScore) {
+                const total = filtered.length;
+                filtered.forEach((item, index) => {
+                    const fallback = total === 1 ? 1 : (total - index) / total;
+                    item.score = Number(fallback.toFixed(4));
+                });
             }
         }
         return filtered;

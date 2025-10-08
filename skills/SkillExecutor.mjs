@@ -2,6 +2,7 @@ import { invokeAgent } from '../invocation/modelInvoker.mjs';
 import { getAgent } from '../agents/agentRegistry.mjs';
 import { safeJsonParse } from '../utils/json.mjs';
 import { createFlexSearchAdapter } from '../search/flexsearchAdapter.mjs';
+import { startTyping, stopTyping } from '../utils/typingIndicator.mjs';
 
 async function executeSkill({
     skillName,
@@ -193,9 +194,6 @@ async function executeSkill({
         // First try exact match
         for (const option of options) {
             if (candidateToken === option.labelToken || candidateToken === option.valueToken) {
-                if (debugMode) {
-                    console.log(`[FlexSearch] Exact match for "${name}": "${value}" → "${option.label}"`);
-                }
                 return { matched: true, confidence: 1.0, value: option.value, matches: [option] };
             }
         }
@@ -209,9 +207,6 @@ async function executeSkill({
         }
         
         if (!Array.isArray(searchResults) || searchResults.length === 0) {
-            if (debugMode) {
-                console.log(`[FlexSearch] No matches for "${name}": "${value}"`);
-            }
             return { matched: false, confidence: 0, value: null, matches: [] };
         }
         
@@ -232,14 +227,6 @@ async function executeSkill({
         } else if (matchedOptions.length >= 2) {
             // Multiple matches - low confidence (ambiguous)
             confidence = 0.3;
-        }
-        
-        if (debugMode) {
-            if (confidence >= 0.8) {
-                console.log(`[FlexSearch] High-confidence match for "${name}": "${value}" → "${matchedOptions[0].label}"`);
-            } else {
-                console.log(`[FlexSearch] Low-confidence match for "${name}": "${value}" → [${matchedOptions.map(o => o.label).join(', ')}]`);
-            }
         }
         
         return {
@@ -621,9 +608,6 @@ async function executeSkill({
             const flexResult = matchOptionWithFlexSearch(argName, taskDescription);
             if (flexResult.matched && flexResult.confidence >= 0.8) {
                 flexSearchPrefills.set(argName, flexResult.value);
-                if (debugMode) {
-                    console.log(`[FlexSearch] Pre-filled "${argName}" from task description`);
-                }
             }
         }
         
@@ -637,9 +621,6 @@ async function executeSkill({
         
         // If all required args are now filled, we're done
         if (!missingRequiredArgs().length) {
-            if (debugMode && flexSearchPrefills.size > 0) {
-                console.log(`[FlexSearch] Filled all required arguments without LLM`);
-            }
             return flexSearchPrefills.size > 0;
         }
 
@@ -694,10 +675,6 @@ async function executeSkill({
             }
             return `${def.name}: string - capture all tokens until next argument name`;
         }).join('\n');
-        
-        if (debugMode) {
-            console.log('[LLM] Invoking language model for argument extraction');
-        }
 
         const systemPrompt = `You extract tool arguments from natural language requests, including VOICE INPUT patterns. Respond ONLY with JSON using keys from ${allowedKeys}. Use exact casing.
 
@@ -767,6 +744,9 @@ Use numbers for numeric fields, booleans for true/false. If value is ambiguous o
 
         sections.push(`Apply the voice input pattern rules above. Remember to capture multi-word values until the next argument name. Map phrases to appropriate arguments. Return JSON only, empty object {} if no parameters found.`);
 
+        // Show typing indicator during LLM processing
+        startTyping();
+        
         let raw;
         try {
             raw = await invokeAgent(agent, [
@@ -774,7 +754,10 @@ Use numbers for numeric fields, booleans for true/false. If value is ambiguous o
                 { role: 'human', message: sections.join('\n\n') },
             ], { mode: 'fast' });
         } catch (error) {
+            stopTyping();
             return false;
+        } finally {
+            stopTyping();
         }
 
         const parsed = safeJsonParse(typeof raw === 'string' ? raw.trim() : raw);
@@ -783,9 +766,6 @@ Use numbers for numeric fields, booleans for true/false. If value is ambiguous o
         }
 
         const status = applyUpdatesMap(parsed);
-        if (debugMode && status !== 'unchanged') {
-            console.log(`[LLM] Applied updates from language model: ${JSON.stringify(parsed)}`);
-        }
         return status !== 'unchanged';
     };
 
@@ -916,6 +896,9 @@ Use numbers for numeric fields, booleans for true/false. If value is ambiguous o
 
         humanSections.push('Return JSON only. Use "confirm" to proceed, "cancel" to stop, or "edit" with updates to adjust specific arguments.');
 
+        // Show typing indicator during LLM processing
+        startTyping();
+        
         let raw;
         try {
             raw = await invokeAgent(agent, [
@@ -923,7 +906,10 @@ Use numbers for numeric fields, booleans for true/false. If value is ambiguous o
                 { role: 'human', message: humanSections.join('\n\n') },
             ], { mode: 'fast' });
         } catch (error) {
+            stopTyping();
             return null;
+        } finally {
+            stopTyping();
         }
 
         const parsed = safeJsonParse(typeof raw === 'string' ? raw.trim() : raw);
@@ -1193,17 +1179,11 @@ Use numbers for numeric fields, booleans for true/false. If value is ambiguous o
                 const validation = validateArgumentValue(argName, value);
                 if (validation.valid) {
                     normalizedArgs[argName] = validation.value;
-                    if (debugMode) {
-                        console.log(`[FlexSearch] Matched "${argName}" from user input before LLM fallback`);
-                    }
                 }
             }
             
             // Check again if we're done after FlexSearch matching
             if (!missingRequiredArgs().length) {
-                if (debugMode && flexSearchMatches.size > 0) {
-                    console.log(`[FlexSearch] Filled remaining arguments without LLM`);
-                }
                 break;
             }
 
@@ -1211,9 +1191,6 @@ Use numbers for numeric fields, booleans for true/false. If value is ambiguous o
             // Just loop back to prompt for remaining arguments
             const currentPending = missingRequiredArgs();
             if (currentPending.length < missingRequiredAtStart.length) {
-                if (debugMode) {
-                    console.log(`[Skip LLM] Progress made (${missingRequiredAtStart.length - currentPending.length} filled), prompting for remaining ${currentPending.length}`);
-                }
                 continue;
             }
 
@@ -1222,10 +1199,6 @@ Use numbers for numeric fields, booleans for true/false. If value is ambiguous o
                 agent = getAgent();
             } catch (error) {
                 throw new Error(`Unable to obtain language model for parsing arguments: ${error.message}`);
-            }
-            
-            if (debugMode) {
-                console.log('[LLM] Falling back to language model for remaining arguments');
             }
 
             const systemPrompt = 'You extract structured JSON arguments for tool execution. Respond with JSON only, no commentary.';
@@ -1265,6 +1238,9 @@ Use numbers for numeric fields, booleans for true/false. If value is ambiguous o
             humanPromptSections.push(`User response: ${trimmedInput}`);
             humanPromptSections.push('Return a JSON object containing values for the missing argument names. Omit any extraneous fields.');
 
+            // Show typing indicator during LLM processing
+            startTyping();
+            
             let rawExtraction;
             try {
                 rawExtraction = await invokeAgent(agent, [
@@ -1272,7 +1248,10 @@ Use numbers for numeric fields, booleans for true/false. If value is ambiguous o
                     { role: 'human', message: humanPromptSections.join('\n\n') },
                 ], { mode: 'fast' });
             } catch (error) {
+                stopTyping();
                 throw new Error(`Failed to parse arguments with the language model: ${error.message}`);
+            } finally {
+                stopTyping();
             }
 
             const parsedExtraction = safeJsonParse(typeof rawExtraction === 'string' ? rawExtraction.trim() : rawExtraction);
@@ -1308,10 +1287,6 @@ Use numbers for numeric fields, booleans for true/false. If value is ambiguous o
 
                 normalizedArgs[name] = validation.value;
                 appliedFromModel = true;
-                
-                if (debugMode) {
-                    console.log(`[LLM] Extracted "${name}" = ${JSON.stringify(validation.value)}`);
-                }
             }
 
             if (invalidFromModel.size) {
