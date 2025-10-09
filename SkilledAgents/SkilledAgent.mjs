@@ -13,17 +13,6 @@ function defaultPromptReader(message) {
     });
 }
 
-const serializeContext = (context) => {
-    if (!context || typeof context !== 'object') {
-        return '';
-    }
-    try {
-        return JSON.stringify(context, null, 2);
-    } catch (error) {
-        return String(context);
-    }
-};
-
 class SkilledAgent {
     constructor({ llmAgent, skillRegistry = null, promptReader = null } = {}) {
         if (!llmAgent) {
@@ -74,41 +63,16 @@ class SkilledAgent {
         this.skillRegistry.clear();
     }
 
-    async doTask(agentContext, description, { mode = 'fast', outputSchema = null } = {}) {
-        if (!description || typeof description !== 'string') {
-            throw new Error('doTask requires a task description string.');
-        }
-        const prompt = [
-            'Agent context:',
-            serializeContext(agentContext),
-            'Task description:',
-            description,
-            outputSchema ? `Use the following output schema:\n${JSON.stringify(outputSchema, null, 2)}` : '',
-            'Response:',
-        ].filter(Boolean).join('\n\n');
-
-        return this.llmAgent.complete({ prompt, mode, context: { intent: 'task-execution' } });
+    async doTask(agentContext, description, options = {}) {
+        return this.llmAgent.doTask(agentContext, description, options);
     }
 
-    async doTaskWithReview(agentContext, description, { mode = 'deep', maxIterations = 3 } = {}) {
-        const prompt = [
-            'Agent context:',
-            serializeContext(agentContext),
-            'Task description:',
-            description,
-            `Create a plan with at most ${maxIterations} steps and provide a reviewed answer.`,
-            'Response:',
-        ].filter(Boolean).join('\n\n');
-
-        return this.llmAgent.complete({ prompt, mode, context: { intent: 'task-review' } });
+    async doTaskWithReview(agentContext, description, options = {}) {
+        return this.llmAgent.doTaskWithReview(agentContext, description, options);
     }
 
     async doTaskWithHumanReview(agentContext, description, options = {}) {
-        const draft = await this.doTask(agentContext, description, options);
-        return {
-            draft,
-            humanReviewRequired: true,
-        };
+        return this.llmAgent.doTaskWithHumanReview(agentContext, description, options);
     }
 
     cancelTasks() {

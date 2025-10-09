@@ -4,31 +4,39 @@ import {
     classifyIntent,
     responseToJSON,
 } from './markdown.mjs';
+import { defaultLLMInvokerStrategy } from '../utils/LLMClient.mjs';
 
 const DEFAULT_AGENT_NAME = 'DefaultLLMAgent';
+
+const serializeContext = (context) => {
+    if (!context || typeof context !== 'object') {
+        return '';
+    }
+    try {
+        return JSON.stringify(context, null, 2);
+    } catch (error) {
+        return String(context);
+    }
+};
 
 class LLMAgent {
     constructor(options = {}) {
         const {
             name = DEFAULT_AGENT_NAME,
-            fastModel = null,
-            deepModel = null,
-            invoker,
-            metadata = {},
+            invokerStrategy = null,
         } = options;
 
         if (!name || typeof name !== 'string') {
             throw new Error('LLMAgent requires a non-empty name.');
         }
-        if (typeof invoker !== 'function') {
-            throw new Error(`LLMAgent "${name}" requires an invoker function.`);
+
+        const resolvedStrategy = invokerStrategy || defaultLLMInvokerStrategy;
+        if (typeof resolvedStrategy !== 'function') {
+            throw new Error(`LLMAgent "${name}" requires an invokerStrategy function.`);
         }
 
         this.name = name;
-        this.fastModel = fastModel;
-        this.deepModel = deepModel || fastModel;
-        this.invoker = invoker;
-        this.metadata = { ...metadata };
+        this.invokerStrategy = resolvedStrategy;
     }
 
     parseMarkdownKeyValues(markdown) {
@@ -103,43 +111,38 @@ class LLMAgent {
     }
 
     getSupportedModes() {
-        const modes = [];
-        if (this.fastModel) {
-            modes.push('fast');
+        if (this.invokerStrategy && typeof this.invokerStrategy.getSupportedModes === 'function') {
+            const modes = this.invokerStrategy.getSupportedModes();
+            if (Array.isArray(modes) && modes.length) {
+                return modes;
+            }
         }
-        if (this.deepModel) {
-            modes.push('deep');
-        }
-        return modes.length ? modes : ['fast'];
+        return ['fast'];
     }
 
-    resolveModel(mode = 'fast') {
-        const normalized = typeof mode === 'string' ? mode.toLowerCase() : 'fast';
-        if (normalized === 'deep' && this.deepModel) {
-            return this.deepModel;
-        }
-        if (this.fastModel) {
-            return this.fastModel;
-        }
-        if (this.deepModel) {
-            return this.deepModel;
-        }
-        throw new Error(`LLMAgent "${this.name}" has no models configured.`);
-    }
+    async complete(options = {}) {
+        const {
+            prompt,
+            history = [],
+            mode = 'fast',
+            model = null,
+            context = {},
+            ...invokerExtras
+        } = options;
 
-    async complete({ prompt, history = [], mode = 'fast', context = {} } = {}) {
         if (!prompt || typeof prompt !== 'string') {
             throw new Error('complete requires a prompt string.');
         }
+
         const conversation = Array.isArray(history) ? history.slice() : [];
-        const model = this.resolveModel(mode);
-        const response = await this.invoker({
+        const response = await this.invokerStrategy({
             prompt,
             history: conversation,
             mode,
             model,
             agent: this,
             context,
+            ...invokerExtras,
         });
         if (typeof response === 'string') {
             return response;
@@ -147,7 +150,70 @@ class LLMAgent {
         if (response && typeof response === 'object' && typeof response.output === 'string') {
             return response.output;
         }
-        throw new Error('LLMAgent invoker must return a string response.');
+        throw new Error('LLMAgent invokerStrategy must return a string response.');
+    }
+
+    async doTask(agentContext, description, options = {}) {
+        const {
+            mode = 'fast',
+            model = null,
+            outputSchema = null,
+            ...rest
+        } = options;
+
+        if (!description || typeof description !== 'string') {
+            throw new Error('doTask requires a task description string.');
+        }
+        const prompt = [
+            'Agent context:',
+            serializeContext(agentContext),
+            'Task description:',
+            description,
+            outputSchema ? `Use the following output schema:\n${JSON.stringify(outputSchema, null, 2)}` : '',
+            'Response:',
+        ].filter(Boolean).join('\n\n');
+
+        return this.complete({
+            prompt,
+            mode,
+            model,
+            context: { intent: 'task-execution' },
+            ...rest,
+        });
+    }
+
+    async doTaskWithReview(agentContext, description, options = {}) {
+        const {
+            mode = 'deep',
+            maxIterations = 3,
+            model = null,
+            ...rest
+        } = options;
+
+        const prompt = [
+            'Agent context:',
+            serializeContext(agentContext),
+            'Task description:',
+            description,
+            `Create a plan with at most ${maxIterations} steps and provide a reviewed answer.`,
+            'Response:',
+        ].filter(Boolean).join('\n\n');
+
+        return this.complete({
+            prompt,
+            mode,
+            model,
+            context: { intent: 'task-review', maxIterations },
+            ...rest,
+        });
+    }
+
+    async doTaskWithHumanReview(agentContext, description, options = {}) {
+        const draft = await this.doTask(agentContext, description, options);
+        return {
+            draft,
+            humanReviewRequired: true,
+        };
     }
 }
 

@@ -43,7 +43,7 @@ All exports are forwarded from `AgentLib.mjs`, including helpers such as
 
 ## Model & Provider Configuration
 
-The library expects a models configuration file at `models/providers/models.json`. You can override the path via the `LLM_MODELS_CONFIG_PATH` environment variable. Providers may require API keys; check the following environment variables:
+The library expects an LLM configuration file named `LLMConfig.json` at the package root. You can override the path via the `LLM_MODELS_CONFIG_PATH` environment variable. Providers may require API keys; check the following environment variables:
 
 - `OPENAI_API_KEY`
 - `GEMINI_API_KEY`

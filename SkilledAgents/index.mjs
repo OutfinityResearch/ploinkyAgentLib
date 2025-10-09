@@ -2,6 +2,7 @@ import { llmAgentRegistry } from '../LLMAgents/LLMAgentRegistry.mjs';
 import SkillRegistry from './SkillRegistry.mjs';
 import { SkilledAgent } from './SkilledAgent.mjs';
 import { executeSkill } from './SkillExecutor.mjs';
+import { chooseSkillWithLLM } from './skillSelection.mjs';
 
 const registerLLMAgent = (config, options = {}) => llmAgentRegistry.register(config, options);
 const registerDefaultLLMAgent = (config = {}) => llmAgentRegistry.registerDefault(config);
@@ -25,6 +26,7 @@ export {
     SkilledAgent,
     SkillRegistry,
     executeSkill,
+    chooseSkillWithLLM,
     createSkilledAgent,
     registerLLMAgent,
     registerDefaultLLMAgent,

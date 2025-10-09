@@ -444,11 +444,12 @@ export default class SkillRegistry {
 
     rankSkill(taskDescription, options = {}) {
         if (!this.skills.size) {
-            return [];
+            return {};
         }
+
         const query = typeof taskDescription === 'string' ? taskDescription.trim() : '';
         if (!query) {
-            return [];
+            return {};
         }
 
         // Support both single role and array of roles
@@ -476,66 +477,66 @@ export default class SkillRegistry {
             throw new Error('rankSkill requires a caller role for access filtering.');
         }
 
-        const limit = Number.isInteger(options.limit) && options.limit > 0 ? options.limit : options.limit === 0 ? 0 : 5;
-        const includeScores = options.includeScores === true;
+        const limit = Number.isInteger(options.limit) && options.limit > 0
+            ? options.limit
+            : (options.limit === 0 ? 0 : 5);
+        const includeScores = false;
         const searchOptions = {
             bool: options?.bool === 'and' ? 'and' : 'or',
-            suggest: true,
-            ...(includeScores ? { enrich: true } : {}),
+            suggest: options?.suggest !== false,
             ...(limit ? { limit } : {}),
         };
 
         let rawResults;
         try {
             rawResults = this.index.search(query, searchOptions);
+            console.log("Raw Results", rawResults);
         } catch (error) {
-            return [];
+            return {};
         }
+
         const matches = normalizeSearchResults(rawResults, { includeScores });
         if (!matches.length) {
-            return [];
+            return {};
         }
+
         const seen = new Set();
-        const filtered = [];
+        const orderedRecords = [];
+
         for (const entry of matches) {
-            const key = includeScores ? entry?.id : entry;
+            const key = entry;
             const canonical = normalizeSkillName(key);
             if (!canonical || seen.has(canonical)) {
                 continue;
             }
             if (this.skills.has(canonical)) {
                 const record = this.skills.get(canonical);
-                // Check if user has any of the required roles for this skill
-                const hasAccess = Array.isArray(record.roles) && 
-                    normalizedRoles.some(userRole => record.roles.includes(userRole));
+                const hasAccess = Array.isArray(record.roles)
+                    && normalizedRoles.some(userRole => record.roles.includes(userRole));
 
                 if (hasAccess) {
                     seen.add(canonical);
-                    if (includeScores) {
-                        filtered.push({
-                            name: record.name,
-                            score: typeof entry?.score === 'number' ? entry.score : null,
-                        });
-                    } else {
-                        filtered.push(record.name);
-                    }
+                    orderedRecords.push(record);
                 }
             }
-            if (limit && filtered.length >= limit) {
+            if (limit && orderedRecords.length >= limit) {
                 break;
             }
         }
-        if (includeScores && filtered.length) {
-            const hasNumericScore = filtered.some(item => typeof item.score === 'number' && Number.isFinite(item.score));
-            if (!hasNumericScore) {
-                const total = filtered.length;
-                filtered.forEach((item, index) => {
-                    const fallback = total === 1 ? 1 : (total - index) / total;
-                    item.score = Number(fallback.toFixed(4));
-                });
-            }
+
+        if (!orderedRecords.length) {
+            return {};
         }
-        return filtered;
+
+        const resultMap = {};
+
+        for (let index = 0; index < orderedRecords.length; index += 1) {
+            const record = orderedRecords[index];
+            const ordinal = Math.min(index + 1, 5);
+            resultMap[record.name] = ordinal;
+        }
+
+        return resultMap;
     }
 
     getSkill(skillName) {

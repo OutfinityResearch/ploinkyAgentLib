@@ -3,34 +3,31 @@ import assert from 'node:assert/strict';
 
 import { LLMAgent, LLMAgentRegistry } from '../LLMAgents/index.mjs';
 
-test('LLMAgent invokes configured models for fast and deep modes', async (t) => {
+test('LLMAgent delegates completions to the invokerStrategy', async () => {
     const calls = [];
     const agent = new LLMAgent({
         name: 'MockAgent',
-        fastModel: 'mock-fast',
-        deepModel: 'mock-deep',
-        invoker: async ({ prompt, model, mode }) => {
-            calls.push({ prompt, model, mode });
-            return `response:${model}`;
+        invokerStrategy: async ({ prompt, mode, agent }) => {
+            calls.push({ prompt, mode, agentName: agent.name });
+            return `response:${mode}`;
         },
     });
 
     const fast = await agent.complete({ prompt: 'Hello world', mode: 'fast' });
-    assert.equal(fast, 'response:mock-fast');
+    assert.equal(fast, 'response:fast');
 
     const deep = await agent.complete({ prompt: 'Deep dive', mode: 'deep' });
-    assert.equal(deep, 'response:mock-deep');
+    assert.equal(deep, 'response:deep');
 
     assert.equal(calls.length, 2);
-    assert.equal(calls[0].model, 'mock-fast');
-    assert.equal(calls[1].model, 'mock-deep');
+    assert.deepEqual(calls.map(call => call.mode), ['fast', 'deep']);
+    assert.deepEqual(calls.map(call => call.agentName), ['MockAgent', 'MockAgent']);
 });
 
 test('LLMAgent parses markdown and classifies responses', async () => {
     const agent = new LLMAgent({
         name: 'ParserAgent',
-        fastModel: 'mock-fast',
-        invoker: async ({ prompt }) => {
+        invokerStrategy: async ({ prompt }) => {
             if (prompt.includes('Interpret')) {
                 return '- intent: update\n- updates: priority=urgent';
             }
@@ -52,17 +49,18 @@ test('LLMAgent parses markdown and classifies responses', async () => {
     assert.equal(interpreted.updates.priority, 'urgent');
 });
 
-test('LLMAgentRegistry manages agents and defaults', async (t) => {
+test('LLMAgentRegistry manages agents and defaults', async () => {
     const registry = new LLMAgentRegistry();
+    const baseInvoker = async () => 'result';
+
     const agentA = registry.register({
         name: 'AgentA',
-        fastModel: 'fa',
-        invoker: async () => 'A',
+        invokerStrategy: baseInvoker,
     }, { setAsDefault: true });
+
     const agentB = registry.register({
         name: 'AgentB',
-        fastModel: 'fb',
-        invoker: async () => 'B',
+        invokerStrategy: async () => 'B',
     });
 
     assert.equal(registry.getDefault(), agentA);
@@ -70,8 +68,7 @@ test('LLMAgentRegistry manages agents and defaults', async (t) => {
 
     registry.registerDefault({
         name: 'AgentC',
-        fastModel: 'fc',
-        invoker: async () => 'C',
+        invokerStrategy: async () => 'C',
     });
     assert.equal(registry.getDefault().name, 'AgentC');
 
