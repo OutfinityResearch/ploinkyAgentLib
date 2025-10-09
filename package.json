@@ -4,35 +4,19 @@
   "description": "Agent library for orchestrating skill-based LLM interactions.",
   "license": "MIT",
   "type": "module",
-  "main": "dist/cjs/index.cjs",
-  "module": "dist/esm/index.js",
+  "main": "index.mjs",
   "exports": {
-    ".": {
-      "import": "./dist/esm/index.js",
-      "require": "./dist/cjs/index.cjs"
-    },
+    ".": "./index.mjs",
     "./package.json": "./package.json"
   },
   "files": [
-    "dist",
-    "*.mjs",
-    "agents",
-    "context",
-    "invocation",
-    "models",
-    "operators",
-    "search",
-    "skills",
-    "tasks",
-    "utils",
-    "src"
+    "index.mjs",
+    "LLMAgents",
+    "SkilledAgents"
   ],
   "scripts": {
-    "build": "npm run build:esm && npm run build:cjs",
-    "build:esm": "esbuild src/index.mjs --bundle --format=esm --outdir=dist/esm --platform=node --sourcemap --external:flexsearch",
-    "build:cjs": "esbuild src/index.mjs --bundle --format=cjs --outdir=dist/cjs --platform=node --sourcemap --external:flexsearch"
+    "test": "node --test tests/*.test.mjs"
   },
   "devDependencies": {
-    "esbuild": "^0.21.4"
   }
 }
