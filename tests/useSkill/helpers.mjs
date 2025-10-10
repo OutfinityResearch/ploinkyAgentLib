@@ -1,6 +1,20 @@
 import { LLMAgent } from '../../LLMAgents/index.mjs';
 import { SkilledAgent } from '../../SkilledAgents/SkilledAgent.mjs';
 
+function cloneValue(value) {
+    if (Array.isArray(value)) {
+        return value.map(cloneValue);
+    }
+    if (value && typeof value === 'object') {
+        const copy = {};
+        for (const [key, inner] of Object.entries(value)) {
+            copy[key] = cloneValue(inner);
+        }
+        return copy;
+    }
+    return value;
+}
+
 export async function runUseSkillScenario({
     agentName = 'UseSkillScenarioAgent',
     taskDescription,
@@ -8,8 +22,13 @@ export async function runUseSkillScenario({
     skillConfig,
     interceptExtraction = false,
     manualOverrides = null,
+    additionalMatchers = [],
 }) {
     const llmAgent = new LLMAgent({ name: agentName });
+    const workingSkillConfig = {
+        ...skillConfig,
+        specs: cloneValue(skillConfig.specs),
+    };
     if (interceptExtraction) {
         const originalComplete = llmAgent.complete.bind(llmAgent);
         const maxIntercepts = interceptExtraction === true ? 1 : Number(interceptExtraction) || 0;
@@ -23,7 +42,7 @@ export async function runUseSkillScenario({
         };
 
         const normalize = (value) => (value || '').toString().trim().replace(/[.!]+$/, '');
-        const matchers = [
+        const baseMatchers = [
             { key: 'project_code', regex: /project code (?:is|should be|set to|=)\s+([a-z0-9\- _]+)/i },
             { key: 'location', regex: /location (?:is|should be|set to|=)\s+([a-z0-9\- _]+)/i },
             { key: 'start_date', regex: /start(?: date)? (?:is|should be|set to|on|=)\s+([a-z0-9\- ,]+)/i },
@@ -42,6 +61,7 @@ export async function runUseSkillScenario({
             { key: 'sku_id', regex: /(?:sku|item|product) (?:is|should be|set to|=)\s+([a-z0-9\- ']+)/i },
             { key: 'sku_id', regex: /transfer the\s+([a-z0-9\- ']+)/i },
         ];
+        const matchers = [...baseMatchers, ...additionalMatchers];
 
         llmAgent.interpretMessage = async (message) => {
             if (!message || typeof message !== 'string') {
@@ -97,15 +117,15 @@ export async function runUseSkillScenario({
     if (manualOverrides && typeof manualOverrides === 'function') {
         manualOverrides({
             agent,
-            skillConfig: skillConfig.specs,
+            skillConfig: workingSkillConfig.specs,
         });
     }
 
     const skill = {
-        ...skillConfig,
+        ...workingSkillConfig,
         action: (...args) => {
-            const result = typeof skillConfig.action === 'function'
-                ? skillConfig.action(...args)
+            const result = typeof workingSkillConfig.action === 'function'
+                ? workingSkillConfig.action(...args)
                 : (args.length === 1 ? args[0] : args);
             actionCalls.push(result);
             return result;
