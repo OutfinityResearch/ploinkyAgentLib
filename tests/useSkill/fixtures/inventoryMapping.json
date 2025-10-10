@@ -1,0 +1,20 @@
+{
+  "sourceWarehouses": {
+    "Berlin Central Warehouse": {
+      "id": "WH-DE-01",
+      "code": "DE-BER-CEN"
+    }
+  },
+  "destinationWarehouses": {
+    "Munich Flagship Store": {
+      "id": "WH-DE-09",
+      "code": "DE-MUC-FLG"
+    }
+  },
+  "skus": {
+    "Skyline Display Units": {
+      "id": "SKU-4455",
+      "internalCode": "DISPLAY-SKY"
+    }
+  }
+}

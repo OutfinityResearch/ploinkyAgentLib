@@ -1,28 +1,66 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { readdirSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { join, extname, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('.', import.meta.url).pathname;
-const entries = readdirSync(root);
-const testFiles = entries
-    .filter(name => extname(name) === '.mjs' && name !== 'runAllTests.js')
-    .sort();
+const rootPath = fileURLToPath(new URL('.', import.meta.url));
+
+const DEFAULT_DISABLED = new Set(['runAllTests.js', 'useSkill/helpers.mjs']);
+const envDisabled = (process.env.DISABLED_TESTS || '')
+    .split(',')
+    .map(entry => entry.trim())
+    .filter(Boolean);
+const disabled = new Set([...DEFAULT_DISABLED, ...envDisabled]);
+
+function collectTestFiles(dirPath, basePath = dirPath) {
+    const collected = [];
+    const entries = readdirSync(dirPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+        if (entry.name.startsWith('.')) {
+            continue;
+        }
+
+        const fullPath = join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+            collected.push(...collectTestFiles(fullPath, basePath));
+            continue;
+        }
+        if (extname(entry.name) !== '.mjs') {
+            continue;
+        }
+
+        const relativePath = relative(basePath, fullPath);
+        if (disabled.has(entry.name) || disabled.has(relativePath)) {
+            continue;
+        }
+        collected.push(relativePath);
+    }
+
+    return collected;
+}
+
+const testFiles = collectTestFiles(rootPath).sort();
 
 if (!testFiles.length) {
     console.log('No test files found.');
     process.exit(0);
 }
 
+if (disabled.size) {
+    console.log('Disabled tests:', Array.from(disabled).join(', ') || 'none');
+}
+
 const results = [];
 
-for (const file of testFiles) {
-    const path = join(root, file);
-    const child = spawnSync('node', ['--test', path], { stdio: 'pipe', encoding: 'utf8' });
+for (const relativePath of testFiles) {
+    const absolutePath = join(rootPath, relativePath);
+    const child = spawnSync('node', ['--test', absolutePath], { stdio: 'pipe', encoding: 'utf8' });
 
     const passed = child.status === 0;
     results.push({
-        file,
+        file: relativePath,
         status: passed ? 'passed' : 'failed',
         exitCode: child.status,
         stdout: child.stdout?.trim() || '',
@@ -30,11 +68,9 @@ for (const file of testFiles) {
     });
 
     const statusLabel = passed ? 'PASS' : 'FAIL';
-    console.log(`${statusLabel} ${file}`);
-    if (!passed) {
-        if (child.stderr) {
-            console.error(child.stderr.trim());
-        }
+    console.log(`${statusLabel} ${relativePath}`);
+    if (!passed && child.stderr) {
+        console.error(child.stderr.trim());
     }
 }
 

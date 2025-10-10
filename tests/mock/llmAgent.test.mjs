@@ -1,7 +1,23 @@
+/*
+ * Test focus: Validate the standalone LLMAgent utility layer without touching real providers.
+ *
+ * Scenario outline:
+ *   1. Feed a mock invoker strategy and confirm every completion call is forwarded with the
+ *      expected parameters.
+ *   2. Exercise the markdown helper methods so we know key/value extraction, idea parsing and
+ *      intent classification work in isolation.
+ *   3. Drive the LLMAgentRegistry through registration, default selection, and clearing to
+ *      ensure it behaves predictably when multiple agents coexist.
+ *
+ * Expectations:
+ *   - The invoker strategy receives the exact prompts/modes the agent emits.
+ *   - Markdown helpers interpret structured responses without relying on an actual LLM.
+ *   - Registry bookkeeping correctly tracks named agents and handles defaults.
+ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { LLMAgent, LLMAgentRegistry } from '../LLMAgents/index.mjs';
+import { LLMAgent, LLMAgentRegistry } from '../../LLMAgents/index.mjs';
 
 test('LLMAgent delegates completions to the invokerStrategy', async () => {
     const calls = [];
