@@ -72,7 +72,13 @@ await agent.executePrompt(taskDescription, options);
 
 // Execute with explicit skill
 await agent.executeSkill('my-skill', 'task description');
+
+// Toggle registered skills without removing them from the catalog
+agent.disableSkills(['my-skill-cskill']);
+agent.enableSkills(['my-skill-cskill']);
 ```
+
+Every registered skill carries an `enabled` boolean. Disabled skills remain visible through `getSkills()` but cannot execute, build, or appear in MainAgent and orchestrator tool surfaces.
 
 **Model Configuration:**
 

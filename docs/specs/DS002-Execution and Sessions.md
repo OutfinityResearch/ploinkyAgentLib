@@ -38,6 +38,7 @@ Return session result
 
 **Tool building for sessions:**
 - Registered skills are exposed as tools unless they are explicitly listed in an orchestrator skill's Allowed Skills or Allowed Preparation Skills sections
+- Disabled skills remain in the registry but are excluded from MainAgent tools and both orchestrator allowlist surfaces
 - Each tool has a handler that calls executeSkill internally
 - Tool names are sanitised short names
 - Tool descriptions come from the skill descriptor
@@ -144,6 +145,7 @@ Test files should be created in tests/mainAgent/
 - Throws error when skill not found
 - Delegates to correct subsystem
 - Passes options through to subsystem
+- Rejects a disabled skill without fallback
 
 **Session management tests should cover:**
 - First executePrompt creates session

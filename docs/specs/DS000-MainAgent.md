@@ -118,6 +118,7 @@ const agent = new MainAgent({
 - **Supervised tool approval** — delegates tool authorization to supervisor
 - **Model configuration** — semantic tag-to-model mapping for all LLM calls
 - **Session interruption control** — exposes `cancelCurrentSession(reason)` to interrupt the active agentic session
+- **Runtime skill state** — exposes `enableSkills(names)` and `disableSkills(names)` for atomic catalog-state changes
 
 ## Rules
 
@@ -127,6 +128,8 @@ const agent = new MainAgent({
 - Skill discovery is downward-only; no upward search
 - Skills listed in an orchestrator's Allowed Skills or Allowed Preparation Skills sections are not exposed as top-level tools during executePrompt sessions
 - MainAgent stores only one active session; executePrompt reuses it after first creation
+- Disabled skills remain registered but are excluded from build, direct execution, top-level tools, and orchestrator tools
+- Enabling or disabling a batch replaces the active session's tool surface without recreating the session
 - Model selection is resolved via LLMAgent.modelConfig and getModelByTag()
 - The modelConfig is forwarded to all subsystems through SubsystemFactory
 

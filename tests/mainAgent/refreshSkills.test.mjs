@@ -33,6 +33,57 @@ afterEach(() => {
 });
 
 describe('MainAgent.refreshSkills', () => {
+    it('disables and enables named skills while retaining them in the catalog', async () => {
+        const workspace = makeTempDir('mainagent-enabled-state-');
+        writeCSkill(workspace, 'alpha', 'Alpha skill.');
+        writeCSkill(workspace, 'beta', 'Beta skill.');
+
+        const agent = new MainAgent({ startDir: workspace });
+        const session = new LoopAgentSession({
+            agent: agent.llmAgent,
+            tools: agent._buildToolsForSession(),
+        });
+        agent._session = session;
+
+        const disabled = agent.disableSkills(['alpha']);
+        assert.deepEqual(disabled.map((skill) => skill.name), ['alpha-cskill']);
+        assert.equal(agent.getSkillRecord('alpha').enabled, false);
+        assert.equal(agent.getSkills().length, 2);
+        assert.equal(session.tools.alpha, undefined);
+        assert.ok(session.tools.beta);
+        await assert.rejects(
+            () => agent.executeSkill('alpha', 'input'),
+            /alpha-cskill.*disabled/,
+        );
+
+        agent.enableSkills(['alpha-cskill']);
+        assert.equal(agent.getSkillRecord('alpha').enabled, true);
+        assert.ok(session.tools.alpha);
+    });
+
+    it('validates a complete batch before changing any skill state', () => {
+        const workspace = makeTempDir('mainagent-enabled-atomic-');
+        writeCSkill(workspace, 'alpha', 'Alpha skill.');
+        const agent = new MainAgent({ startDir: workspace });
+
+        assert.throws(() => agent.disableSkills(['alpha', 'missing']), /Unknown skill/);
+        assert.equal(agent.getSkillRecord('alpha').enabled, true);
+        assert.throws(() => agent.disableSkills('alpha'), /array/);
+    });
+
+    it('preserves disabled state across workspace refresh and enables new skills by default', () => {
+        const workspace = makeTempDir('mainagent-enabled-refresh-');
+        writeCSkill(workspace, 'alpha', 'Alpha skill.');
+        const agent = new MainAgent({ startDir: workspace });
+        agent.disableSkills(['alpha']);
+
+        writeCSkill(workspace, 'beta', 'Beta skill.');
+        agent.refreshSkills();
+
+        assert.equal(agent.getSkillRecord('alpha').enabled, false);
+        assert.equal(agent.getSkillRecord('beta').enabled, true);
+    });
+
     it('registers new workspace skills and refreshes current loop session tools in place', () => {
         const workspace = makeTempDir('mainagent-refresh-');
         writeCSkill(workspace, 'alpha', 'Alpha skill.');

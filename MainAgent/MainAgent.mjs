@@ -66,6 +66,7 @@ export class MainAgent {
 
         this._skills = new Map();
         this._skillAliases = new Map();
+        this._disabledSkillNames = new Set();
         this._orchestratorAllowedSkills = new Set();
         this._duplicateSkillEvents = [];
         this._session = null;
@@ -117,8 +118,10 @@ export class MainAgent {
             type: skill.type,
             isInternal: Boolean(skill.isInternal),
             skillDir: skill.skillDir,
+            enabled: skill.enabled !== false,
         }));
-        const availableSkills = skills.filter((skill) => !this._orchestratorAllowedSkills.has(skill.name));
+        const availableSkills = skills.filter((skill) => skill.enabled !== false
+            && !this._orchestratorAllowedSkills.has(skill.name));
         const phase = context.phase ? ` phase=${context.phase}` : '';
 
         if (Array.isArray(context.additionalRoots) && context.additionalRoots.length) {
@@ -143,7 +146,7 @@ export class MainAgent {
         const orchestratorAllowedSkills = new Set();
 
         for (const skillRecord of this._skills.values()) {
-            if (skillRecord.type !== 'orchestrator') {
+            if (skillRecord.enabled === false || skillRecord.type !== 'orchestrator') {
                 continue;
             }
 
@@ -154,7 +157,7 @@ export class MainAgent {
 
             for (const declaredName of declaredSkillNames) {
                 const targetRecord = this.getSkillRecord(declaredName);
-                if (!targetRecord || targetRecord.name === skillRecord.name) {
+                if (!targetRecord || targetRecord.enabled === false || targetRecord.name === skillRecord.name) {
                     continue;
                 }
                 orchestratorAllowedSkills.add(targetRecord.name);
@@ -170,6 +173,7 @@ export class MainAgent {
     _registerSkill(skillRecord) {
         const { name, type, shortName, descriptor, skillDir } = skillRecord;
         skillRecord._sourceMtimeMs = getSourceMtimeMs(skillRecord.filePath);
+        skillRecord.enabled = !this._disabledSkillNames.has(name);
 
         const baseName = sanitiseName(descriptor?.name || shortName);
         const aliases = new Set([
@@ -318,6 +322,9 @@ export class MainAgent {
         if (!skillRecord) {
             throw new Error(`Skill "${skillName}" not found.`);
         }
+        if (skillRecord.enabled === false) {
+            throw new Error(`Skill "${skillRecord.name}" is disabled.`);
+        }
 
         const subsystem = this.subsystemFactory.get(skillRecord.type);
         if (!subsystem || typeof subsystem.executeSkillPrompt !== 'function') {
@@ -342,7 +349,7 @@ export class MainAgent {
      * Safe to call multiple times — skills that are already built are skipped.
      */
     async buildSkills() {
-        const skills = this.getSkills();
+        const skills = this.getSkills().filter((skillRecord) => skillRecord.enabled !== false);
         const buildTasks = skills.map(async (skillRecord) => {
             const subsystem = this.subsystemFactory.get(skillRecord.type);
             if (subsystem && typeof subsystem.buildSkill === 'function') {
@@ -426,6 +433,7 @@ export class MainAgent {
     _buildToolsForSession() {
         const tools = {};
         const allSkills = this.getSkills()
+            .filter((skillRecord) => skillRecord.enabled !== false)
             .filter((skillRecord) => !this._orchestratorAllowedSkills.has(skillRecord.name));
 
         for (const skillRecord of allSkills) {
@@ -491,6 +499,50 @@ export class MainAgent {
 
     getSkills() {
         return Array.from(this._skills.values());
+    }
+
+    enableSkills(skillNames) {
+        return this._setSkillsEnabled(skillNames, true);
+    }
+
+    disableSkills(skillNames) {
+        return this._setSkillsEnabled(skillNames, false);
+    }
+
+    _setSkillsEnabled(skillNames, enabled) {
+        if (!Array.isArray(skillNames)) {
+            throw new TypeError('Skill names must be provided as an array.');
+        }
+
+        const records = [];
+        const missing = [];
+        const seen = new Set();
+        for (const identifier of skillNames) {
+            const record = this.getSkillRecord(identifier);
+            if (!record) {
+                missing.push(String(identifier));
+                continue;
+            }
+            if (seen.has(record.name)) continue;
+            seen.add(record.name);
+            records.push(record);
+        }
+        if (missing.length) {
+            throw new Error(`Unknown skill(s): ${missing.join(', ')}`);
+        }
+
+        for (const record of records) {
+            record.enabled = enabled;
+            if (enabled) this._disabledSkillNames.delete(record.name);
+            else this._disabledSkillNames.add(record.name);
+        }
+
+        this._refreshOrchestratedSkillIndex();
+        this._refreshCurrentSessionTools({
+            enabledChanged: records.map((record) => record.name),
+            enabled,
+        });
+        return records;
     }
 
     ensureSubsystem(type) {
