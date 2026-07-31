@@ -35,7 +35,7 @@ class StubLLMAgent extends LLMAgent {
             if (skillName === 'planner-orchestrator-orchestrator') {
                 return {
                     plan: [
-                        { intent: 'reporting', skill: 'llm-reporter-anthropic', run: true, input: prompt, reason: 'Primary reporting path' },
+                        { intent: 'reporting', skill: 'llm-reporter-cskill', run: true, input: prompt, reason: 'Primary reporting path' },
                         { intent: 'data-fetch', skill: 'inventory-data-retrieval-ploinky', run: true, input: prompt, reason: 'Retrieve supporting data' },
                     ],
                     notes: '',
@@ -47,7 +47,7 @@ class StubLLMAgent extends LLMAgent {
             if (skillName === 'llm-planner-orchestrator') {
                 return {
                     plan: [
-                        { intent: 'summary', skill: 'llm-reporter-anthropic', run: true, input: prompt, reason: 'Summarise findings' },
+                        { intent: 'summary', skill: 'llm-reporter-cskill', run: true, input: prompt, reason: 'Summarise findings' },
                         { intent: 'data-fetch', skill: 'llm-data-lookup-ploinky', run: true, input: prompt, reason: 'Gather data for summary' },
                     ],
                     notes: 'Default stub plan',
@@ -60,7 +60,7 @@ class StubLLMAgent extends LLMAgent {
 
             if (userPrompt.includes('daily warehouse report')) {
                 return plannerMarkdownDecision({
-                    tool: 'llm-reporter-anthropic',
+                    tool: 'llm-reporter-cskill',
                     prompt: 'Prepare daily warehouse report',
                 });
             }

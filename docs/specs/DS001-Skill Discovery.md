@@ -35,7 +35,6 @@ Each skill record has an `isInternal` boolean property set to true for internal 
 
 | Filename | Subsystem Type |
 |----------|---------------|
-| SKILL.md | anthropic |
 | dcgskill.md | dynamic-code-generation |
 | cskill.md | cskill |
 | oskill.md | orchestrator |
@@ -123,7 +122,7 @@ Test files should be created in tests/mainAgent/
 - Skips node_modules directories
 - Skips symbolic links
 - Returns empty array when no skills found
-- Detects all descriptor file types
+- Detects all supported descriptor file types
 - Creates correct skill record structure
 - Canonical name format is correct
 - Handles missing descriptor files gracefully

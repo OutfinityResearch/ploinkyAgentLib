@@ -4,7 +4,6 @@ import path from 'node:path';
 import { Sanitiser } from '../../utils/Sanitiser.mjs';
 
 const SKILL_FILE_TYPES = {
-    'SKILL.md': { type: 'anthropic' },
     'dcgskill.md': { type: 'dynamic-code-generation' },
     'cskill.md': { type: 'cskill' },
     'oskill.md': { type: 'orchestrator' },

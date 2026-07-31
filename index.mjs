@@ -4,7 +4,6 @@ export * from './utils/ActionReporter.mjs';
 export * from './utils/MarkdownDataStore.mjs';
 export * from './MainAgent/index.mjs';
 export * from './DynamicCodeGenerationSubsystem/index.mjs';
-export * from './AnthropicSkillsSubsystem/index.mjs';
 export * from './PloinkyAgentSkillsSubsystem/index.mjs';
 export * from './OrchestratorSkillsSubsystem/index.mjs';
 export * from './DBTableSkillsSubsystem/index.mjs';

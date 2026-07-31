@@ -46,7 +46,7 @@
                     <p>Interactive continuation is handled explicitly. If a tool result is a structured payload containing <code>requiresConfirmation</code> or <code>requiresInput</code>, the session moves into <code>awaiting_input</code> state, records the pending tool in history, and returns the interaction message. On the next prompt, the session first checks whether the new user message should continue that pending interaction. To do so, it uses <code>interpretMessage()</code> with the bounded intents <code>accept</code>, <code>cancel</code>, and <code>update</code>, together with a fresh-instruction heuristic. If the new message still belongs to the pending interaction, the session routes it back to the same tool rather than opening a new planner turn.</p>
                     <div class="doc-callout doc-callout--note">
                         <span class="doc-callout__label">Note</span>
-                        <p>This pending-input behavior is what makes loop sessions usable as multi-turn governed workflows. In loop-based orchestration and Anthropic Skills, the surrounding subsystem may store the paused session in <code>sessionMemory</code> and resume it on the next user prompt.</p>
+                        <p>This pending-input behavior is what makes loop sessions usable as multi-turn governed workflows. In loop-based orchestration, the surrounding subsystem may store the paused session in <code>sessionMemory</code> and resume it on the next user prompt.</p>
                     </div>
                 </section>
 

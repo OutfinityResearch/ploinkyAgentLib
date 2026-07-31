@@ -29,7 +29,6 @@
                         <a href="code-skills.html">Code Skills</a>
                         <a href="dynamic-code-generation-skills.html">Dynamic Code</a>
                         <a href="ploinky-skills.html">Ploinky Skills</a>
-                        <a href="anthropic-skills.html">Anthropic Skills</a>
                     </nav>
                 </div>
 
@@ -61,7 +60,7 @@
 
                 <section>
                     <h2>Skill Families</h2>
-                    <p>The next layer is the family-specific contract. <a href="orchestration-skills.html">Orchestration Skills</a> define bounded coordination over other skills and determine whether execution proceeds through loop sessions or SOP sessions, and may also declare <code>## Allowed Agents</code> to incorporate remote Ploinky agents as session tools. <a href="dbtable-skills.html">DBTable Skills</a> formalize table-oriented workflows whose source specification in <code>tskill.md</code> is transformed into generated runtime code. <a href="code-skills.html">Code Skills</a> ultimately execute modules loaded from <code>src/index.mjs</code> or <code>src/index.js</code>. <a href="dynamic-code-generation-skills.html">Dynamic Code Generation Skills</a> follow a different contract, centered on runtime text-or-code decisions and temporary execution of generated snippets. <a href="ploinky-skills.html">Ploinky Agent Skills</a> provide dynamic agent discovery and invocation through the router for orchestrator-driven coordination. <a href="anthropic-skills.html">Anthropic Skills</a> treat <code>SKILL.md</code> as the governing descriptor surface for a loop-session runtime that may expose scripts and resources.</p>
+                    <p>The next layer is the family-specific contract. <a href="orchestration-skills.html">Orchestration Skills</a> define bounded coordination over other skills and determine whether execution proceeds through loop sessions or SOP sessions, and may also declare <code>## Allowed Agents</code> to incorporate remote Ploinky agents as session tools. <a href="dbtable-skills.html">DBTable Skills</a> formalize table-oriented workflows whose source specification in <code>tskill.md</code> is transformed into generated runtime code. <a href="code-skills.html">Code Skills</a> ultimately execute modules loaded from <code>src/index.mjs</code> or <code>src/index.js</code>. <a href="dynamic-code-generation-skills.html">Dynamic Code Generation Skills</a> follow a different contract, centered on runtime text-or-code decisions and temporary execution of generated snippets. <a href="ploinky-skills.html">Ploinky Agent Skills</a> provide dynamic agent discovery and invocation through the router for orchestrator-driven coordination.</p>
                     <p>Each family page explains not only what the descriptor looks like, but what the subsystem actually imports, prepares, generates, or executes at runtime. This is why the skill-family pages are separate from the general runtime pages: the common agent contract stays shared, but the local interpretation rules are materially different.</p>
                 </section>
 

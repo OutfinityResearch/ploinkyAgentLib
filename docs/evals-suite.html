@@ -27,7 +27,7 @@
 
         <section>
             <h2>Current Evaluation Surfaces</h2>
-            <p>The current evaluation tree covers several distinct runtime surfaces. The planning directory contains full session-level evaluations for both <code>startLoopAgentSession</code> and <code>startSOPLangAgentSession</code>. The detect-intents evaluator measures skill detection and semantic parameter accuracy against JSON case files and a declared skill-description space. The mirror-code-generation evaluator generates code for benchmark skills and then executes behavior-oriented checks against the generated artifacts. The model-benchmark scripts compare configured models under different scenarios, including model benchmarks, SOP-versus-loop sweeps, ad hoc orchestrator evaluation, and code-generation benchmarks. The tree also includes Anthropic Skill evaluations and a separate agentic-performance evaluator that compares loop and SOP behavior over the same performance cases.</p>
+            <p>The current evaluation tree covers several distinct runtime surfaces. The planning directory contains full session-level evaluations for both <code>startLoopAgentSession</code> and <code>startSOPLangAgentSession</code>. The detect-intents evaluator measures skill detection and semantic parameter accuracy against JSON case files and a declared skill-description space. The mirror-code-generation evaluator generates code for benchmark skills and then executes behavior-oriented checks against the generated artifacts. The model-benchmark scripts compare configured models under different scenarios, including model benchmarks, SOP-versus-loop sweeps, ad hoc orchestrator evaluation, and code-generation benchmarks. A separate agentic-performance evaluator compares loop and SOP behavior over the same performance cases.</p>
             <div class="tree-diagram" aria-label="Evaluation suite tree">
                 <p class="tree-diagram__title">Current evaluation tree</p>
                 <ul class="tree-diagram__root">
@@ -38,7 +38,6 @@
                             <li><span class="tree-node tree-node--folder">detectIntents/</span></li>
                             <li><span class="tree-node tree-node--folder">mirror-code-gen/</span></li>
                             <li><span class="tree-node tree-node--folder">modelBenchmark/</span></li>
-                            <li><span class="tree-node tree-node--folder">anthropic-skills/</span></li>
                             <li><span class="tree-node tree-node--folder">performanceCases/</span></li>
                             <li><span class="tree-node tree-node--file">evalDetectIntents.mjs</span></li>
                             <li><span class="tree-node tree-node--file">evalAgenticPerformance.mjs</span></li>

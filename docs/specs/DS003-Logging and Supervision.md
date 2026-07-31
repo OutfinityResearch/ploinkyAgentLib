@@ -34,8 +34,7 @@ MainAgent (logger accepted)
   │     ├── OrchestratorSkillsSubsystem → uses logger
   │     ├── CodeSkillsSubsystem → uses logger
   │     ├── DBTableSkillsSubsystem → uses logger
-  │     ├── DynamicCodeGenerationSubsystem → receives logger
-  │     └── AnthropicSkillsSubsystem → receives logger
+  │     └── DynamicCodeGenerationSubsystem → receives logger
   │
   └── LLMAgent → receives logger
         ├── LoopAgentSession → uses logger (replaces getDebugLogger() singleton)

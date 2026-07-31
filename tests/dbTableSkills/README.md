@@ -155,58 +155,6 @@ Apply generated functions (prepare, validate, present)
 Return result
 ```
 
-## Current Limitations
-
-### 1. MainAgent Support
-
-MainAgent doesn't natively support `tskill.md` files yet. The SKILL_FILE_TYPES constant in MainAgent.mjs needs to be extended:
-
-```javascript
-const SKILL_FILE_TYPES = {
-    'skill.md': { type: 'anthropic' },
-    'dcgskill.md': { type: 'dynamic-code-generation' },
-    'oskill.md': { type: 'orchestrator' },
-    'tskill.md': { type: 'dbtable' },  // ADD THIS LINE
-};
-```
-
-And the `ensureSubsystem()` method needs to handle the 'dbtable' type:
-
-```javascript
-ensureSubsystem(type) {
-    if (this.subsystems.has(type)) {
-        return this.subsystems.get(type);
-    }
-
-    let subsystem;
-    if (type === 'dynamic-code-generation') {
-        subsystem = new DynamicCodeGenerationSubsystem({ llmAgent: this.aggregatorAgent.llmAgent });
-    } else if (type === 'orchestrator') {
-        subsystem = new OrchestratorSkillsSubsystem({ llmAgent: this.aggregatorAgent.llmAgent });
-    } else if (type === 'dbtable') {  // ADD THIS BLOCK
-        subsystem = new DBTableSkillsSubsystem({
-            llmAgent: this.aggregatorAgent.llmAgent,
-            dbAdapter: this.dbAdapter  // Need to add dbAdapter to MainAgent
-        });
-    } else {
-        subsystem = new AnthropicSkillsSubsystem();
-    }
-
-    this.subsystems.set(type, subsystem);
-    return subsystem;
-}
-```
-
-### 2. Workarounds in Tests
-
-Until native support is added, the tests manually:
-- Register the DBTableSkillsSubsystem
-- Prepare skills
-- Add skills to the catalog
-- Set up aliases
-
-See the E2E tests for examples of this manual registration.
-
 ## Mock Objects
 
 ### MockLLMAgent
@@ -243,14 +191,13 @@ The test suite covers:
 
 ## Future Enhancements
 
-1. **Native tskill.md Support**: Add tskill.md to MainAgent's SKILL_FILE_TYPES
-2. **Database Adapter Integration**: Connect to real database adapters
-3. **Advanced Validation**: Test complex validation rules and business logic
-4. **Relationship Testing**: Test foreign key relationships between tables
-5. **Migration Testing**: Test schema migration workflows
-6. **Performance Testing**: Test function generation performance and caching
-7. **Bulk Operations**: Test bulk CREATE, UPDATE, DELETE operations
-8. **Transaction Support**: Test transactional workflows
+1. **Database Adapter Integration**: Connect to real database adapters
+2. **Advanced Validation**: Test complex validation rules and business logic
+3. **Relationship Testing**: Test foreign key relationships between tables
+4. **Migration Testing**: Test schema migration workflows
+5. **Performance Testing**: Test function generation performance and caching
+6. **Bulk Operations**: Test bulk CREATE, UPDATE, DELETE operations
+7. **Transaction Support**: Test transactional workflows
 
 ## Contributing
 

@@ -10,7 +10,7 @@ AchillesAgentLib is a modular, skill-based agent framework that enables LLM-powe
 │  ┌─────────────────────────────────────────────────────────────────┐   │
 │  │                      Skill Discovery                             │   │
 │  │  - Scans skills directories                            │   │
-│  │  - Registers skills by type (skill.md, dcgskill.md, etc.)         │   │
+│  │  - Registers skills by descriptor type                            │   │
 │  │  - Creates aliases for flexible skill resolution                │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                                │                                        │
@@ -21,14 +21,14 @@ AchillesAgentLib is a modular, skill-based agent framework that enables LLM-powe
 │                                │                                        │
 │  ┌─────────────────────────────▼─────────────────────────────────────┐ │
 │  │                        Subsystems                                  │ │
-│  │  ┌─────────────┐ ┌──────────────┐ ┌─────────────┐ ┌─────────────┐  │ │
-│  │  │  anthropic  │ │ dynamic-code │ │ code-skill  │ │orchestrator │  │ │
-│  │  │ (skill.md)  │ │ (dcgskill.md) │ │ (cskill.md) │ │ (oskill.md) │  │ │
-│  │  └─────────────┘ └──────────────┘ └─────────────┘ └─────────────┘  │ │
-│  │  ┌─────────────┐ ┌─────────────┐                                   │ │
-│  │  │   dbtable   │ │  ploinky *  │                                   │ │
-│  │  │ (tskill.md) │ │ (no file)   │                                   │ │
-│  │  └─────────────┘ └─────────────┘                                   │ │
+│  │  ┌──────────────┐ ┌─────────────┐ ┌─────────────┐                  │ │
+│  │  │ dynamic-code │ │ code-skill  │ │orchestrator │                  │ │
+│  │  │ (dcgskill.md) │ │ (cskill.md) │ │ (oskill.md) │                  │ │
+│  │  └──────────────┘ └─────────────┘ └─────────────┘                  │ │
+│  │  ┌─────────────┐ ┌─────────────┐                                  │ │
+│  │  │   dbtable   │ │  ploinky *  │                                  │ │
+│  │  │ (tskill.md) │ │ (no file)   │                                  │ │
+│  │  └─────────────┘ └─────────────┘                                  │ │
 │  └───────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -49,7 +49,6 @@ The main entry point and coordinator for skill-based execution.
 **Skill File Types:**
 | File | Type | Subsystem |
 |------|------|-----------|
-| `skill.md` | anthropic | AnthropicSkillsSubsystem |
 | `dcgskill.md` | dynamic-code-generation | DynamicCodeGenerationSubsystem |
 | `cskill.md` | cskill | CodeSkillsSubsystem |
 | `oskill.md` | orchestrator | OrchestratorSkillsSubsystem |
@@ -306,26 +305,6 @@ Dynamic coordination subsystem that enables orchestrator skills to discover and 
 
 ---
 
-### 8. AnthropicSkillsSubsystem (`AnthropicSkillsSubsystem/AnthropicSkillsSubsystem.mjs`)
-
-Simple passthrough subsystem for basic Anthropic skills.
-
-**Skill Definition (skill.md):**
-```markdown
-# HelperSkill
-
-A simple helper that returns skill information.
-
-## Summary
-Basic information about this skill.
-
-Body content with detailed description...
-```
-
-**Usage:** Returns skill metadata without LLM execution. Useful for documentation or simple info retrieval.
-
----
-
 ## Utility Components
 
 ### Sanitiser (`utils/Sanitiser.mjs`)
@@ -384,11 +363,9 @@ skills/
 ├── my-dynamic-code-skill/
 │   ├── dcgskill.md           # Dynamic code generation skill definition
 │   └── my-dynamic-code-skill.js    # Optional module implementation
-├── my-db-skill/
-│   ├── tskill.md           # DB table skill definition
-│   └── tskill.generated.mjs # Auto-generated functions
-└── my-anthropic-skill/
-    └── skill.md            # Basic Anthropic skill definition
+└── my-db-skill/
+    ├── tskill.md           # DB table skill definition
+    └── tskill.generated.mjs # Auto-generated functions
 ```
 
 ---

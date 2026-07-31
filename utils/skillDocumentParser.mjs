@@ -19,7 +19,7 @@ export function createSectionKey(heading) {
 
 /**
  * Parse a skill markdown document into a structured descriptor.
- * Extracts name (first heading), rawContent (full content, frontmatter removed for SKILL.md),
+ * Extracts name (first heading), rawContent (full content),
  * and sections (keyed by normalized heading).
  *
  * @param {string} filePath - Path to the skill markdown file
