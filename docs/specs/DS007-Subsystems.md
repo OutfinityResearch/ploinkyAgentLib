@@ -43,10 +43,6 @@ Coordinates multiple skills to accomplish complex tasks through agentic sessions
 
 Manages database table operations with LLM-powered query interpretation, validation, and confirmation flows. Defined by `tskill.md`.
 
-### AnthropicSkillsSubsystem (`anthropic`)
-
-Simple passthrough for basic skills — starts an agentic loop session with the skill's content as system prompt. Defined by `skill.md`.
-
 ## prepareSkill vs buildSkill
 
 | Aspect | `prepareSkill` | `buildSkill` |

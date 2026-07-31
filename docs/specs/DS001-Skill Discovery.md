@@ -35,7 +35,6 @@ Each skill record has an `isInternal` boolean property set to true for internal 
 
 | Filename | Subsystem Type |
 |----------|---------------|
-| SKILL.md | anthropic |
 | dcgskill.md | dynamic-code-generation |
 | cskill.md | cskill |
 | oskill.md | orchestrator |
@@ -54,6 +53,7 @@ Each discovered skill produces a record containing:
 - **descriptor** — parsed descriptor content (populated by subsystem during registration)
 - **preparedConfig** — subsystem-specific configuration (populated during registration)
 - **isInternal** — boolean, true for package-internal skills, false for user skills
+- **enabled** — boolean runtime state, true on first registration unless the same canonical name was previously disabled on this MainAgent
 
 ## Alias System
 
@@ -123,7 +123,7 @@ Test files should be created in tests/mainAgent/
 - Skips node_modules directories
 - Skips symbolic links
 - Returns empty array when no skills found
-- Detects all descriptor file types
+- Detects all supported descriptor file types
 - Creates correct skill record structure
 - Canonical name format is correct
 - Handles missing descriptor files gracefully
@@ -158,3 +158,5 @@ Test files should be created in tests/mainAgent/
 - All aliases point to the same record
 - listSkillsByType filters by type using canonical registry
 - getSkills returns all skills from canonical registry
+- enableSkills and disableSkills validate the complete input array before changing records
+- disabled state survives refreshSkills while newly discovered skills start enabled

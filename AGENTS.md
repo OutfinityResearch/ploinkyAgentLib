@@ -16,7 +16,7 @@ Design specifications live under `docs/specs/`. `docs/specs/matrix.md` lists the
 │  ┌─────────────────────────────────────────────────────────────────┐    │
 │  │                      Skill Discovery                            │    │
 │  │  - Scans skills directories                                     │    │
-│  │  - Registers skills by type (skill.md, dcgskill.md, etc.)        │    │
+│  │  - Registers skills by descriptor type                           │    │
 │  │  - Creates aliases for flexible skill resolution                │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │                                │                                        │
@@ -27,14 +27,14 @@ Design specifications live under `docs/specs/`. `docs/specs/matrix.md` lists the
 │                                │                                        │
 │  ┌─────────────────────────────▼─────────────────────────────────────┐  │
 │  │                        Subsystems                                 │  │
-│  │  ┌─────────────┐ ┌──────────────┐ ┌─────────────┐ ┌─────────────┐ │  │
-│  │  │  anthropic  │ │ dynamic-code │ │ code-skill  │ │orchestrator │ │  │
-│  │  │ (skill.md)  │ │ (dcgskill.md) │ │ (cskill.md) │ │ (oskill.md) │ │  │
-│  │  └─────────────┘ └──────────────┘ └─────────────┘ └─────────────┘ │  │
-│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                  │  │
-│  │  │   dbtable   │ │  ploinky *  │ │             │                  │  │
-│  │  │ (tskill.md) │ │ (no file)   │ │             │                  │  │
-│  │  └─────────────┘ └─────────────┘ └─────────────┘                  │  │
+│  │  ┌──────────────┐ ┌─────────────┐ ┌─────────────┐                 │  │
+│  │  │ dynamic-code │ │ code-skill  │ │orchestrator │                 │  │
+│  │  │ (dcgskill.md) │ │ (cskill.md) │ │ (oskill.md) │                 │  │
+│  │  └──────────────┘ └─────────────┘ └─────────────┘                 │  │
+│  │  ┌─────────────┐ ┌─────────────┐                                 │  │
+│  │  │   dbtable   │ │  ploinky *  │                                 │  │
+│  │  │ (tskill.md) │ │ (no file)   │                                 │  │
+│  │  └─────────────┘ └─────────────┘                                 │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -56,7 +56,6 @@ The main entry point and coordinator for skill-based execution.
 **Skill File Types:**
 | File | Type | Subsystem |
 |------|------|-----------|
-| `skill.md` | anthropic | AnthropicSkillsSubsystem |
 | `dcgskill.md` | dynamic-code-generation | DynamicCodeGenerationSubsystem |
 | `cskill.md` | cskill | CodeSkillsSubsystem |
 | `oskill.md` | orchestrator | OrchestratorSkillsSubsystem |
@@ -73,7 +72,13 @@ await agent.executePrompt(taskDescription, options);
 
 // Execute with explicit skill
 await agent.executeSkill('my-skill', 'task description');
+
+// Toggle registered skills without removing them from the catalog
+agent.disableSkills(['my-skill-cskill']);
+agent.enableSkills(['my-skill-cskill']);
 ```
+
+Every registered skill carries an `enabled` boolean. Disabled skills remain visible through `getSkills()` but cannot execute, build, or appear in MainAgent and orchestrator tool surfaces.
 
 **Model Configuration:**
 
@@ -422,26 +427,6 @@ Coordinate between local skills and remote agents.
 
 ---
 
-### 8. AnthropicSkillsSubsystem (`AnthropicSkillsSubsystem/AnthropicSkillsSubsystem.mjs`)
-
-Simple passthrough subsystem for basic Anthropic skills.
-
-**Skill Definition (skill.md):**
-```markdown
-# HelperSkill
-
-A simple helper that returns skill information.
-
-## Summary
-Basic information about this skill.
-
-Body content with detailed description...
-```
-
-**Usage:** Returns skill metadata without LLM execution. Useful for documentation or simple info retrieval.
-
----
-
 ## Utility Components
 
 ### Sanitiser (`utils/Sanitiser.mjs`)
@@ -578,11 +563,9 @@ skills/
 ├── my-dynamic-code-skill/
 │   ├── dcgskill.md           # Dynamic code generation skill definition
 │   └── my-dynamic-code-skill.js    # Optional module implementation
-├── my-db-skill/
-│   ├── tskill.md           # DB table skill definition
-│   └── tskill.generated.mjs # Auto-generated functions
-└── my-anthropic-skill/
-    └── skill.md            # Basic Anthropic skill definition
+└── my-db-skill/
+    ├── tskill.md           # DB table skill definition
+    └── tskill.generated.mjs # Auto-generated functions
 ```
 
 ---

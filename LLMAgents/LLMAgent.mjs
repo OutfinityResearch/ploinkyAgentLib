@@ -467,7 +467,7 @@ ${promptText}`
      * The session runs until a final answer is reached, the user provides
      * input, or execution limits (max steps, max errors) are hit.
      *
-     * Used by: MainAgent.executePrompt(), AnthropicSkillsSubsystem.
+     * Used by: MainAgent.executePrompt().
      *
      * @param {Object} tools - Map of tool name → { handler, description }
      * @param {string} initialPrompt - Starting user request

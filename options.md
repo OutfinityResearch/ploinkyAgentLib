@@ -50,7 +50,7 @@ and how the new skill subsystems consume them.
   debugging.
 - Responses wrapped in Markdown fences are automatically unwrapped before JSON parsing.
 
-### Ploinky Agent / Orchestrator / Anthropic
+### Ploinky Agent / Orchestrator
 
 - These subsystems treat descriptors as informational (no interactive loop). The returned payload is
   a structured summary derived from the descriptor sections.

@@ -182,7 +182,7 @@ Notable options passed through to the loop runtime include:
 - Initial role-aware history (`initialHistory`) for hydrating a newly created session
 - History compression controls (`historyCompressionEnabled`, `historyCompressionThresholdTokens`, `historyCompressionKeepRecentEntries`, `historyCompressionMaxSummaryTokens`, `historyCompressionModel`)
 
-**Used by:** `MainAgent.executePrompt()`, `AnthropicSkillsSubsystem`.
+**Used by:** `MainAgent.executePrompt()`.
 
 ### startSOPLangAgentSession(skillsDescription, initialPrompt, options)
 

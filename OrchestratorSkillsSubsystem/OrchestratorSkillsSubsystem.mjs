@@ -118,7 +118,7 @@ export class OrchestratorSkillsSubsystem {
     }
 
     resolveAllowedSkills(skillRecord, mainAgent) {
-        const allSkills = mainAgent.getSkills();
+        const allSkills = mainAgent.getSkills().filter((record) => record.enabled !== false);
         const selfCanonical = Sanitiser.sanitiseName(skillRecord.name);
         const allowList = skillRecord.preparedConfig?.allowedSkills || [];
 
@@ -150,7 +150,7 @@ export class OrchestratorSkillsSubsystem {
             return [];
         }
 
-        const allSkills = mainAgent.getSkills();
+        const allSkills = mainAgent.getSkills().filter((record) => record.enabled !== false);
         const selfCanonical = Sanitiser.sanitiseName(skillRecord.name);
 
         return allSkills.filter((record) => {
