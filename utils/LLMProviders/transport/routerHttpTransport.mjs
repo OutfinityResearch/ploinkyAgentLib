@@ -15,9 +15,10 @@ const MAX_JSON_UPLOAD_BYTES = 2 * 1024 * 1024;
 const MAX_JSON_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_ERROR_RESPONSE_BYTES = 64 * 1024;
 const MAX_HEADER_BYTES = 64 * 1024;
-const DEFAULT_CONNECT_HEADER_TIMEOUT_MS = 15_000;
+const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
+const DEFAULT_HEADER_TIMEOUT_MS = 460_000;
 const DEFAULT_BODY_IDLE_TIMEOUT_MS = 30_000;
-const DEFAULT_TOTAL_TIMEOUT_MS = 120_000;
+const DEFAULT_TOTAL_TIMEOUT_MS = 510_000;
 
 const PROTECTED_HEADERS = new Set([
     'host',
@@ -309,6 +310,8 @@ export async function routerHttpRequest({
     signal = undefined,
     accept = 'application/json',
     connectHeaderTimeoutMs = undefined,
+    connectTimeoutMs = undefined,
+    headerTimeoutMs = undefined,
     bodyIdleTimeoutMs = undefined,
     totalTimeoutMs = undefined,
 } = {}) {
@@ -331,10 +334,31 @@ export async function routerHttpRequest({
         );
     }
     const callerHeaders = validateCallerHeaders(headers);
+    // Retain the original combined option as a compatibility alias while
+    // allowing callers to bound connection establishment separately from the
+    // application response-header latency that includes model inference.
+    if (connectHeaderTimeoutMs !== undefined
+        && (connectTimeoutMs !== undefined || headerTimeoutMs !== undefined)) {
+        throw new TypeError(
+            'connectHeaderTimeoutMs cannot be combined with connectTimeoutMs or headerTimeoutMs.'
+        );
+    }
+    const combinedTimeout = connectHeaderTimeoutMs === undefined
+        ? undefined
+        : validatePositiveTimeout(
+            connectHeaderTimeoutMs,
+            DEFAULT_CONNECT_TIMEOUT_MS,
+            'connectHeaderTimeoutMs'
+        );
     const connectTimeout = validatePositiveTimeout(
-        connectHeaderTimeoutMs,
-        DEFAULT_CONNECT_HEADER_TIMEOUT_MS,
-        'connectHeaderTimeoutMs'
+        connectTimeoutMs,
+        DEFAULT_CONNECT_TIMEOUT_MS,
+        'connectTimeoutMs'
+    );
+    const headerTimeout = validatePositiveTimeout(
+        headerTimeoutMs,
+        DEFAULT_HEADER_TIMEOUT_MS,
+        'headerTimeoutMs'
     );
     const idleTimeout = validatePositiveTimeout(
         bodyIdleTimeoutMs,
@@ -391,14 +415,22 @@ export async function routerHttpRequest({
     return await new Promise((resolve, reject) => {
         let settled = false;
         let response = null;
+        let connectTimer = null;
         let headerTimer = null;
         let totalTimer = null;
         let request;
+        let socket;
+        let socketConnectEvent;
         let uploadPromise = Promise.resolve();
 
         const cleanup = () => {
+            clearTimeout(connectTimer);
             clearTimeout(headerTimer);
             clearTimeout(totalTimer);
+            request?.removeListener?.('socket', onSocket);
+            if (socketConnectEvent) {
+                socket?.removeListener?.(socketConnectEvent, onConnected);
+            }
             signal?.removeEventListener?.('abort', onAbort);
         };
         const rejectOnce = (error) => {
@@ -413,14 +445,43 @@ export async function routerHttpRequest({
             request?.destroy(error);
             rejectOnce(error);
         };
+        const onConnected = () => {
+            if (combinedTimeout !== undefined) return;
+            clearTimeout(connectTimer);
+            connectTimer = null;
+            if (settled || response) return;
+            headerTimer = setTimeout(() => {
+                const error = timeoutError('PLOINKY_ROUTER_HEADER_TIMEOUT', 'response header');
+                request?.destroy(error);
+                rejectOnce(error);
+            }, headerTimeout);
+            headerTimer.unref?.();
+        };
+        const onSocket = (assignedSocket) => {
+            socket = assignedSocket;
+            const tls = physicalURL.protocol === 'https:';
+            socketConnectEvent = tls ? 'secureConnect' : 'connect';
+            const connecting = tls ? socket.secureConnecting : socket.connecting;
+            if (connecting) {
+                socket.once(socketConnectEvent, onConnected);
+            } else {
+                onConnected();
+            }
+        };
 
         signal?.addEventListener?.('abort', onAbort, { once: true });
-        headerTimer = setTimeout(() => {
-            const error = timeoutError('PLOINKY_ROUTER_CONNECT_HEADER_TIMEOUT', 'connect/header');
+        connectTimer = setTimeout(() => {
+            const legacyCombined = combinedTimeout !== undefined;
+            const error = timeoutError(
+                legacyCombined
+                    ? 'PLOINKY_ROUTER_CONNECT_HEADER_TIMEOUT'
+                    : 'PLOINKY_ROUTER_CONNECT_TIMEOUT',
+                legacyCombined ? 'connect/header' : 'connect'
+            );
             request?.destroy(error);
             rejectOnce(error);
-        }, connectTimeout);
-        headerTimer.unref?.();
+        }, combinedTimeout ?? connectTimeout);
+        connectTimer.unref?.();
         totalTimer = setTimeout(() => {
             const error = timeoutError('PLOINKY_ROUTER_TOTAL_TIMEOUT', 'request');
             response?.destroy(error);
@@ -445,6 +506,7 @@ export async function routerHttpRequest({
 
         try {
             request = requestFactory(physicalURL.protocol, options, (incoming) => {
+                clearTimeout(connectTimer);
                 clearTimeout(headerTimer);
                 response = new RouterHttpResponse(incoming, {
                     cleanup,
@@ -483,6 +545,7 @@ export async function routerHttpRequest({
                 });
             });
             request.maxHeadersCount = 128;
+            request.once('socket', onSocket);
             request.once('error', (error) => {
                 if (signal?.aborted) {
                     rejectOnce(abortError());

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import http from 'node:http';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import test from 'node:test';
 
 import {
@@ -48,7 +48,7 @@ function routeRequestsTo(server, t, captures = []) {
     return captures;
 }
 
-function captureHttpsRequestOptions(physicalOrigin) {
+function captureHttpsRequestOptions(physicalOrigin, { stallHandshake = false } = {}) {
     const descriptorModuleURL = new URL(
         '../utils/LLMProviders/transport/generatedLocalRouterDescriptor.mjs',
         import.meta.url
@@ -60,6 +60,7 @@ function captureHttpsRequestOptions(physicalOrigin) {
     const sourceFixture = fixturePath('public-envelope.json');
     const script = String.raw`
         import fs from 'node:fs';
+        import { EventEmitter } from 'node:events';
         import os from 'node:os';
         import path from 'node:path';
         import {
@@ -69,6 +70,7 @@ function captureHttpsRequestOptions(physicalOrigin) {
         } from 'node:crypto';
 
         const physicalOrigin = ${JSON.stringify(physicalOrigin)};
+        const stallHandshake = ${JSON.stringify(stallHandshake)};
         const sourceFixture = ${JSON.stringify(sourceFixture)};
         const descriptorModuleURL = ${JSON.stringify(descriptorModuleURL)};
         const transportModuleURL = ${JSON.stringify(transportModuleURL)};
@@ -152,23 +154,41 @@ function captureHttpsRequestOptions(physicalOrigin) {
             const descriptor = descriptorModule.loadGeneratedLocalRouterDescriptor();
             const transport = await import(transportModuleURL);
             let captured;
+            let transportErrorCode = null;
             transport.__setRouterRequestFactoryForTests((protocol, options) => {
                 captured = { protocol, options };
-                throw new Error('captured without dialing');
+                if (!stallHandshake) throw new Error('captured without dialing');
+                const request = new EventEmitter();
+                request.write = () => true;
+                request.end = () => queueMicrotask(() => {
+                    const socket = new EventEmitter();
+                    socket.connecting = false;
+                    socket.secureConnecting = true;
+                    request.emit('socket', socket);
+                    setTimeout(() => {}, 100);
+                });
+                request.destroy = () => {};
+                return request;
             });
             try {
                 await transport.routerHttpRequest({
                     descriptor,
                     pathname: descriptorModule.GENERATED_LOCAL_MODELS_PATH,
                     bearer: 'tls-test-bearer',
+                    connectTimeoutMs: stallHandshake ? 30 : undefined,
+                    headerTimeoutMs: stallHandshake ? 500 : undefined,
+                    totalTimeoutMs: stallHandshake ? 1_000 : undefined,
                 });
-            } catch {}
+            } catch (error) {
+                transportErrorCode = error?.code || null;
+            }
             process.stdout.write(JSON.stringify({
                 protocol: captured.protocol,
                 hostname: captured.options.hostname,
                 port: String(captured.options.port),
                 servername: captured.options.servername ?? null,
                 hasRejectUnauthorized: Object.hasOwn(captured.options, 'rejectUnauthorized'),
+                ...(stallHandshake ? { transportErrorCode } : {}),
             }));
         } finally {
             fs.rmSync(tempDirectory, { recursive: true });
@@ -251,6 +271,12 @@ test('binds HTTPS verification and SNI to physical DNS while omitting SNI only f
         servername: null,
         hasRejectUnauthorized: false,
     });
+
+    const stalledHandshake = captureHttpsRequestOptions(
+        'https://router.example.invalid:8443',
+        { stallHandshake: true }
+    );
+    assert.equal(stalledHandshake.transportErrorCode, 'PLOINKY_ROUTER_CONNECT_TIMEOUT');
 });
 
 test('supports exact credentialed model discovery without changing physical routing', async (t) => {
@@ -344,6 +370,15 @@ test('binds method, path, and Accept semantics before socket construction', asyn
             accept: 'text/event-stream',
         }),
         { code: 'PLOINKY_ROUTER_ACCEPT_DENIED' }
+    );
+    await assert.rejects(
+        transport.routerHttpRequest({
+            descriptor: verifiedDescriptor,
+            pathname: descriptorModule.GENERATED_LOCAL_MODELS_PATH,
+            connectHeaderTimeoutMs: 30,
+            connectTimeoutMs: 30,
+        }),
+        /connectHeaderTimeoutMs cannot be combined/
     );
     await assert.rejects(
         transport.routerHttpRequest({
@@ -546,18 +581,66 @@ test('pre-abort prevents dialing and an abort while waiting for headers destroys
     await assert.rejects(pending, { name: 'AbortError', code: 'ABORT_ERR' });
 });
 
-test('bounds connect/header, body-idle, and total request time', async (t) => {
+test('bounds connect, response-header, body-idle, and total request time independently', async (t) => {
+    const neverConnected = new EventEmitter();
+    neverConnected.write = () => true;
+    neverConnected.end = () => {};
+    neverConnected.destroy = () => {};
+    transport.__setRouterRequestFactoryForTests(() => neverConnected);
+    await assert.rejects(
+        transport.routerHttpRequest({
+            descriptor: verifiedDescriptor,
+            pathname: descriptorModule.GENERATED_LOCAL_MODELS_PATH,
+            connectTimeoutMs: 30,
+            headerTimeoutMs: 5_000,
+            bearer: 'connect-timeout-bearer',
+        }),
+        { code: 'PLOINKY_ROUTER_CONNECT_TIMEOUT' }
+    );
+    transport.__resetRouterRequestFactoryForTests();
+
     const headerServer = await createServer(t, () => {});
     routeRequestsTo(headerServer, t);
     await assert.rejects(
         transport.routerHttpRequest({
             descriptor: verifiedDescriptor,
             pathname: descriptorModule.GENERATED_LOCAL_MODELS_PATH,
-            connectHeaderTimeoutMs: 30,
+            connectTimeoutMs: 5_000,
+            headerTimeoutMs: 30,
             bearer: 'header-timeout-bearer',
+        }),
+        { code: 'PLOINKY_ROUTER_HEADER_TIMEOUT' }
+    );
+    transport.__resetRouterRequestFactoryForTests();
+
+    routeRequestsTo(headerServer, t);
+    await assert.rejects(
+        transport.routerHttpRequest({
+            descriptor: verifiedDescriptor,
+            pathname: descriptorModule.GENERATED_LOCAL_MODELS_PATH,
+            connectHeaderTimeoutMs: 30,
+            bearer: 'combined-timeout-compatibility-bearer',
         }),
         { code: 'PLOINKY_ROUTER_CONNECT_HEADER_TIMEOUT' }
     );
+    transport.__resetRouterRequestFactoryForTests();
+
+    const delayedHeaderServer = await createServer(t, (_request, response) => {
+        setTimeout(() => {
+            response.writeHead(200, { 'Content-Type': 'application/json' });
+            response.end('{"ok":true}');
+        }, 75);
+    });
+    routeRequestsTo(delayedHeaderServer, t);
+    const delayedResponse = await transport.routerHttpRequest({
+        descriptor: verifiedDescriptor,
+        pathname: descriptorModule.GENERATED_LOCAL_MODELS_PATH,
+        connectTimeoutMs: 30,
+        headerTimeoutMs: 500,
+        totalTimeoutMs: 1_000,
+        bearer: 'delayed-header-bearer',
+    });
+    assert.deepEqual(await delayedResponse.json(), { ok: true });
     transport.__resetRouterRequestFactoryForTests();
 
     const bodyServer = await createServer(t, (_request, response) => {
