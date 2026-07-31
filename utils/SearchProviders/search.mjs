@@ -31,8 +31,8 @@ export async function callSearch(queryOrMessages, options = {}) {
     if (!provider) {
         throw new Error(
             `Search provider "${providerKey}" is not configured. ` +
-            'Set PLOINKY_AGENT_API_KEY and SOUL_GATEWAY_URL to route ' +
-            'search calls through Soul Gateway, or pass an explicit ' +
+            'Use a valid generated runtime descriptor, or set SOUL_GATEWAY_API_KEY ' +
+            'and SOUL_GATEWAY_BASE_URL for explicit external Soul Gateway calls. Alternatively, pass an explicit ' +
             'options.providerKey for a directly configured OpenAI-compatible provider.'
         );
     }
@@ -44,8 +44,10 @@ export async function callSearch(queryOrMessages, options = {}) {
     const { provider: _p, model: _m, providerKey: _pk, ...passthrough } = options;
 
     return callLLM([], query, {
-        model,
-        providerKey,
+        // The configured provider prefix is a routing hint. LLMClient removes
+        // it before constructing the request body, preserving the exact search
+        // model id without a caller-controlled protected providerKey override.
+        model: `${providerKey}/${model}`,
         ...passthrough,
     });
 }

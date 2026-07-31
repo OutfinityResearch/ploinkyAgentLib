@@ -116,7 +116,7 @@ async function main() {
     }
 
     if (!models.length) {
-        console.log('No models found. Check PLOINKY_AGENT_API_KEY.');
+        console.log('No models found. Check the generated runtime descriptor or explicit provider credentials.');
         return;
     }
 

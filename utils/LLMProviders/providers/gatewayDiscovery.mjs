@@ -21,6 +21,14 @@
  * merging between the two shapes would hide gateway-side bugs.
  */
 
+import {
+    GENERATED_LOCAL_MODELS_PATH,
+    buildGeneratedLocalOperationURL,
+    isVerifiedGeneratedLocalRouterDescriptor,
+    refreshGeneratedLocalRouterDescriptor,
+} from '../transport/generatedLocalRouterDescriptor.mjs';
+import { routerHttpRequest } from '../transport/routerHttpTransport.mjs';
+
 /**
  * Derive the `/v1/models` URL from a provider's baseURL.
  * Strips trailing path segments like `/v1/chat/completions`.
@@ -166,6 +174,47 @@ export async function discoverModels(providerConfig) {
     const issues = { errors: [], warnings: [] };
     const { providerKey, baseURL, apiKeyEnv } = providerConfig;
 
+    if (isVerifiedGeneratedLocalRouterDescriptor(providerConfig.generatedLocalDescriptor)) {
+        const descriptor = refreshGeneratedLocalRouterDescriptor(
+            providerConfig.generatedLocalDescriptor
+        );
+        buildGeneratedLocalOperationURL(descriptor, GENERATED_LOCAL_MODELS_PATH);
+        // Descriptor, mirrors, sources, exact operation, and brand have all
+        // been revalidated. The generated API-key value is read only now.
+        const apiKey = process.env.PLOINKY_AGENT_API_KEY;
+        if (!apiKey) {
+            const error = new Error('Generated-local model discovery requires its runtime credential.');
+            error.code = 'PLOINKY_GENERATED_LOCAL_KEY_MISSING';
+            throw error;
+        }
+        try {
+            const response = await routerHttpRequest({
+                descriptor,
+                pathname: GENERATED_LOCAL_MODELS_PATH,
+                method: 'GET',
+                bearer: apiKey,
+                totalTimeoutMs: 15_000,
+            });
+            if (!response.ok) {
+                const detail = await response.readErrorText();
+                issues.warnings.push(`Auto-discovery: generated-local models returned ${response.status}${detail ? ` (${detail})` : ''}.`);
+                return { models: [], issues };
+            }
+            const data = await response.json();
+            return {
+                models: normalizeDiscoveredModels(data, providerKey),
+                issues,
+            };
+        } catch (error) {
+            if (String(error?.code || '').startsWith('PLOINKY_DESCRIPTOR_')
+                || error?.code === 'PLOINKY_GENERATED_LOCAL_OVERRIDE') {
+                throw error;
+            }
+            issues.warnings.push(`Auto-discovery: generated-local models request failed: ${error.message}`);
+            return { models: [], issues };
+        }
+    }
+
     if (!baseURL) {
         issues.warnings.push(`Auto-discovery: provider "${providerKey}" has no baseURL.`);
         return { models: [], issues };
@@ -191,41 +240,42 @@ export async function discoverModels(providerConfig) {
         }
 
         const data = await resp.json();
-        const rawModels = Array.isArray(data) ? data : (data.data || []);
-
-        const models = rawModels
-            .filter(m => m.id)
-            .map((m) => {
-                const meta = normalizeGatewayModelMetadata(m);
-                const tier = typeof m.tier === 'string' && m.tier.trim()
-                    ? m.tier.trim()
-                    : typeof m.mode === 'string' && m.mode.trim()
-                        ? m.mode.trim()
-                        : null;
-
-                return {
-                    name: m.id,
-                    providerKey,
-                    // Preserve an explicit legacy tier if the gateway still
-                    // emits one, but never guess a default for v2 payloads.
-                    ...(tier ? { tier } : {}),
-                    tags: meta.tags,
-                    inputPrice: meta.pricing.inputPricePerMillion ?? 0,
-                    outputPrice: meta.pricing.outputPricePerMillion ?? 0,
-                    pricing: meta.pricing,
-                    context: meta.contextWindow,
-                    maxOutputTokens: meta.maxOutputTokens,
-                    sortOrder: m.sort_order ?? 100,
-                    isFree: meta.isFree,
-                    billingType: m.billing_type || 'api_key',
-                    fromGateway: true,
-                };
-            })
-            .sort((a, b) => a.sortOrder - b.sortOrder);
+        const models = normalizeDiscoveredModels(data, providerKey);
 
         return { models, issues };
     } catch (err) {
         issues.warnings.push(`Auto-discovery: failed to fetch from ${modelsURL}: ${err.message}`);
         return { models: [], issues };
     }
+}
+
+function normalizeDiscoveredModels(data, providerKey) {
+    const rawModels = Array.isArray(data) ? data : (data.data || []);
+    return rawModels
+        .filter(m => m.id)
+        .map((m) => {
+            const meta = normalizeGatewayModelMetadata(m);
+            const tier = typeof m.tier === 'string' && m.tier.trim()
+                ? m.tier.trim()
+                : typeof m.mode === 'string' && m.mode.trim()
+                    ? m.mode.trim()
+                    : null;
+
+            return {
+                name: m.id,
+                providerKey,
+                ...(tier ? { tier } : {}),
+                tags: meta.tags,
+                inputPrice: meta.pricing.inputPricePerMillion ?? 0,
+                outputPrice: meta.pricing.outputPricePerMillion ?? 0,
+                pricing: meta.pricing,
+                context: meta.contextWindow,
+                maxOutputTokens: meta.maxOutputTokens,
+                sortOrder: m.sort_order ?? 100,
+                isFree: meta.isFree,
+                billingType: m.billing_type || 'api_key',
+                fromGateway: true,
+            };
+        })
+        .sort((a, b) => a.sortOrder - b.sortOrder);
 }

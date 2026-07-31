@@ -47,7 +47,7 @@ if [ -f ~/work/.env ]; then
     set -a; source ~/work/.env; set +a
 fi
 
-SOUL_API_KEY="${PLOINKY_AGENT_API_KEY:?PLOINKY_AGENT_API_KEY must be set}"
+SOUL_API_KEY="${SOUL_GATEWAY_API_KEY:?SOUL_GATEWAY_API_KEY must be set for this explicit external benchmark}"
 
 mkdir -p "$RESULTS_DIR"
 

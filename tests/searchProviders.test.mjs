@@ -1,7 +1,8 @@
 import { test, describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 import {
@@ -87,38 +88,38 @@ describe('callSearch model resolution', () => {
 
     it('provider: "exa" delegates to model search-exa', async () => {
         await callSearch('test query', { provider: 'exa' });
-        assert.equal(captured.modelName, 'search-exa');
+        assert.equal(captured.modelName, 'soul_gateway/search-exa');
         assert.equal(captured.prompt, 'test query');
     });
 
     it('provider: "tavily" delegates to model search-tavily', async () => {
         await callSearch('test', { provider: 'tavily' });
-        assert.equal(captured.modelName, 'search-tavily');
+        assert.equal(captured.modelName, 'soul_gateway/search-tavily');
     });
 
     it('provider: "brave" delegates to model search-brave', async () => {
         await callSearch('test', { provider: 'brave' });
-        assert.equal(captured.modelName, 'search-brave');
+        assert.equal(captured.modelName, 'soul_gateway/search-brave');
     });
 
     it('provider: "google-ai-mode" delegates to headless-google-ai-mode', async () => {
         await callSearch('test', { provider: 'google-ai-mode' });
-        assert.equal(captured.modelName, 'headless-google-ai-mode');
+        assert.equal(captured.modelName, 'soul_gateway/headless-google-ai-mode');
     });
 
     it('provider: "gemini-search" delegates to search-gemini', async () => {
         await callSearch('test', { provider: 'gemini-search' });
-        assert.equal(captured.modelName, 'search-gemini');
+        assert.equal(captured.modelName, 'soul_gateway/search-gemini');
     });
 
     it('options.model overrides provider mapping', async () => {
         await callSearch('test', { model: 'custom-search-model' });
-        assert.equal(captured.modelName, 'custom-search-model');
+        assert.equal(captured.modelName, 'soul_gateway/custom-search-model');
     });
 
     it('options.model takes precedence over options.provider', async () => {
         await callSearch('test', { model: 'my-model', provider: 'exa' });
-        assert.equal(captured.modelName, 'my-model');
+        assert.equal(captured.modelName, 'soul_gateway/my-model');
     });
 });
 
@@ -172,15 +173,17 @@ describe('callSearch pass-through options', () => {
         assert.equal(captured.opts.signal, controller.signal);
     });
 
-    it('sets providerKey to soul_gateway by default', async () => {
+    it('uses a Soul Gateway model qualifier without an explicit providerKey by default', async () => {
         await callSearch('q', { provider: 'exa' });
-        assert.equal(captured.opts.providerKey, 'soul_gateway');
+        assert.equal(captured.modelName, 'soul_gateway/search-exa');
+        assert.equal(Object.hasOwn(captured.opts, 'providerKey'), false);
     });
 
-    it('allows providerKey override', async () => {
+    it('uses an explicit external provider as a model qualifier, not an invocation override', async () => {
         registerProvider({ key: 'my_openai', handler: fakeHandler });
         await callSearch('q', { provider: 'exa', providerKey: 'my_openai' });
-        assert.equal(captured.opts.providerKey, 'my_openai');
+        assert.equal(captured.modelName, 'my_openai/search-exa');
+        assert.equal(Object.hasOwn(captured.opts, 'providerKey'), false);
     });
 
     it('does not leak provider/model/providerKey as duplicate keys', async () => {
@@ -214,7 +217,7 @@ describe('callSearch with message input', () => {
         ];
         await callSearch(messages, { provider: 'brave' });
         assert.equal(captured.prompt, 'search this');
-        assert.equal(captured.modelName, 'search-brave');
+        assert.equal(captured.modelName, 'soul_gateway/search-brave');
     });
 });
 
@@ -238,7 +241,7 @@ describe('callSearch error handling', () => {
         resetProviders();
         await assert.rejects(
             () => callSearch('test', { provider: 'exa' }),
-            /PLOINKY_AGENT_API_KEY/
+            /SOUL_GATEWAY_API_KEY/
         );
     });
 
@@ -249,6 +252,111 @@ describe('callSearch error handling', () => {
             /not configured/
         );
     });
+});
+
+test('real generated-local callSearch composition uses a provider qualifier and preserves the wire model', () => {
+    const packageRoot = path.resolve(import.meta.dirname, '..');
+    const fixtureRoot = path.resolve(import.meta.dirname, '../../../tests/fixtures/router-descriptor');
+    const fixtureEnv = JSON.parse(readFileSync(
+        path.join(fixtureRoot, 'public-environment.json'),
+        'utf8',
+    ));
+    fixtureEnv.PLOINKY_ROUTER_DESCRIPTOR_FILE = path.join(fixtureRoot, 'public-envelope.json');
+    fixtureEnv.ACHILLES_ENV_START_DIR = '/';
+    const transportModuleUrl = pathToFileURL(path.join(
+        packageRoot,
+        'utils/LLMProviders/transport/routerHttpTransport.mjs',
+    )).href;
+    const searchModuleUrl = pathToFileURL(path.join(packageRoot, 'utils/SearchProviders/search.mjs')).href;
+
+    const childSource = `
+        import assert from 'node:assert/strict';
+        import http from 'node:http';
+        import { once } from 'node:events';
+
+        const requests = [];
+        let wireBody = null;
+        const server = http.createServer(async (request, response) => {
+            const chunks = [];
+            for await (const chunk of request) chunks.push(chunk);
+            requests.push({ method: request.method, path: request.url });
+            response.writeHead(200, { 'content-type': 'application/json' });
+            if (request.method === 'GET') {
+                response.end(JSON.stringify({ data: [{ id: 'catalogued-but-not-search' }] }));
+                return;
+            }
+            wireBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            response.end(JSON.stringify({ choices: [{ message: { content: 'search-ok' } }] }));
+        });
+        server.listen(0, '127.0.0.1');
+        await once(server, 'listening');
+        const port = server.address().port;
+
+        const transport = await import(${JSON.stringify(transportModuleUrl)});
+        let socketFactoryCalls = 0;
+        transport.__setRouterRequestFactoryForTests((_protocol, options, callback) => {
+            socketFactoryCalls += 1;
+            return http.request({ ...options, hostname: '127.0.0.1', port }, callback);
+        });
+        const search = await import(${JSON.stringify(searchModuleUrl)});
+        const originalEnv = process.env;
+        let invocationKeyReads = 0;
+        process.env = new Proxy(originalEnv, {
+            get(target, property, receiver) {
+                if (property === 'PLOINKY_AGENT_API_KEY') invocationKeyReads += 1;
+                return Reflect.get(target, property, receiver);
+            },
+        });
+        try {
+            const output = await search.callSearch('find opaque', {
+                provider: 'exa',
+                providerKey: 'soul_gateway',
+            });
+            assert.equal(output, 'search-ok');
+            const countersBeforeOverride = { invocationKeyReads, socketFactoryCalls };
+            await assert.rejects(
+                search.callSearch('blocked', {
+                    provider: 'exa',
+                    providerKey: 'soul_gateway',
+                    apiKey: 'caller-override',
+                }),
+                (error) => error?.code === 'PLOINKY_GENERATED_LOCAL_OVERRIDE',
+            );
+            assert.deepEqual(
+                { invocationKeyReads, socketFactoryCalls },
+                countersBeforeOverride,
+            );
+        } finally {
+            process.env = originalEnv;
+            transport.__resetRouterRequestFactoryForTests();
+            server.close();
+            await once(server, 'close');
+        }
+        process.stdout.write('RESULT:' + JSON.stringify({
+            requests,
+            wireModel: wireBody?.model,
+            invocationKeyReads,
+            socketFactoryCalls,
+        }));
+    `;
+    const child = spawnSync(process.execPath, ['--input-type=module', '--eval', childSource], {
+        cwd: packageRoot,
+        env: fixtureEnv,
+        encoding: 'utf8',
+        timeout: 10_000,
+    });
+
+    assert.equal(child.status, 0, child.stderr || child.stdout);
+    const marker = child.stdout.lastIndexOf('RESULT:');
+    assert.notEqual(marker, -1, child.stdout);
+    const result = JSON.parse(child.stdout.slice(marker + 'RESULT:'.length));
+    assert.deepEqual(result.requests, [
+        { method: 'GET', path: '/base-agent-additional-server/soul-gateway/7000/v1/models' },
+        { method: 'POST', path: '/base-agent-additional-server/soul-gateway/7000/v1/chat/completions' },
+    ]);
+    assert.equal(result.wireModel, 'search-exa');
+    assert.equal(result.invocationKeyReads, 1);
+    assert.equal(result.socketFactoryCalls, 2);
 });
 
 // ── Static invariant: no vendor HTTP code ───────────────────────────

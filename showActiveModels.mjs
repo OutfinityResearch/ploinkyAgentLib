@@ -9,6 +9,7 @@
  */
 
 import { listModelsFromCache, loadModelsConfiguration } from './utils/LLMClient.mjs';
+import { getProviderCredentialAvailability } from './utils/LLMProviders/transport/generatedLocalRouterDescriptor.mjs';
 
 const COLORS = {
     RESET: '\x1b[0m',
@@ -35,7 +36,17 @@ function printSection(title, models) {
         let badge = '';
         if (isPriority) badge += `${COLORS.GREEN}[1st]${COLORS.RESET} `;
         
-        const hasKey = model.apiKeyEnv ? (process.env[model.apiKeyEnv] ? COLORS.GREEN + 'YES' : COLORS.RED + 'NO') : COLORS.GRAY + 'N/A';
+        const credentialAvailability = getProviderCredentialAvailability(
+            { generatedLocalDescriptor: model.generatedLocalDescriptor },
+            model.apiKeyEnv,
+        );
+        const hasKey = credentialAvailability === 'generated-local'
+            ? COLORS.GREEN + 'GENERATED'
+            : credentialAvailability === 'available'
+                ? COLORS.GREEN + 'YES'
+                : credentialAvailability === 'missing'
+                    ? COLORS.RED + 'NO'
+                    : COLORS.GRAY + 'N/A';
         
         console.log(`  ${badge}${COLORS.BOLD}${model.name}${COLORS.RESET}`);
         console.log(`      Provider: ${model.providerKey}`);

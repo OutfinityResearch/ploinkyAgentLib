@@ -38,6 +38,7 @@ const L2_CASES_DIR = path.join(__dirname, 'codeGenCases', 'level2');
 
 const { LLMAgent } = await import('../../LLMAgents/LLMAgent.mjs');
 const { loadModelsConfiguration } = await import('../../utils/LLMClient.mjs');
+const { getProviderCredentialAvailability } = await import('../../utils/LLMProviders/transport/generatedLocalRouterDescriptor.mjs');
 
 const COLORS = {
     RESET: '\x1b[0m',
@@ -173,11 +174,10 @@ function getAvailableModels(modelsConfig, requestedModels, { freeOnly = false } 
         const providerConfig = modelsConfig.providers.get(descriptor.providerKey);
         if (!providerConfig) continue;
 
-        const apiKeyEnv = descriptor.providerKey === 'soul_gateway'
-            ? 'PLOINKY_AGENT_API_KEY'
-            : (descriptor.apiKeyEnv || providerConfig.apiKeyEnv);
-        const apiKey = apiKeyEnv ? process.env[apiKeyEnv] : null;
-        if (!apiKey) continue;
+        const apiKeyEnv = descriptor.apiKeyEnv || providerConfig.apiKeyEnv;
+        const credentialAvailability = getProviderCredentialAvailability(providerConfig, apiKeyEnv);
+        if (credentialAvailability !== 'generated-local'
+            && credentialAvailability !== 'available') continue;
 
         const qualifiedName = `${descriptor.providerKey}/${name}`;
 
@@ -807,7 +807,7 @@ async function main() {
 
     if (availableModels.length === 0) {
         console.log(`${COLORS.RED}No models available to test.${COLORS.RESET}`);
-        console.log('Make sure PLOINKY_AGENT_API_KEY or other provider API keys are set.');
+        console.log('Make sure the generated runtime descriptor or explicit provider credentials are available.');
         return;
     }
 

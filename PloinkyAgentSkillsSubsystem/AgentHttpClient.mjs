@@ -3,12 +3,24 @@
 
 import http from 'node:http';
 import https from 'node:https';
+import { hasGeneratedLocalDescriptorBundle } from '../utils/LLMProviders/transport/generatedLocalRouterDescriptor.mjs';
+
+function assertGeneratedLocalConsumerDisabled(env = process.env) {
+    if (hasGeneratedLocalDescriptorBundle(env)) {
+        const error = new Error(
+            'AgentHttpClient generated-local routing is disabled until it has a certified authority-aware transport.'
+        );
+        error.code = 'PLOINKY_GENERATED_LOCAL_CONSUMER_NOT_CERTIFIED';
+        throw error;
+    }
+}
 
 function stripTrailingSlash(value) {
     return String(value || '').replace(/\/+$/, '');
 }
 
 export function getRouterUrl(env = process.env) {
+    assertGeneratedLocalConsumerDisabled(env);
     const routerUrl = env.PLOINKY_ROUTER_URL;
     if (routerUrl && typeof routerUrl === 'string' && routerUrl.trim()) {
         return stripTrailingSlash(routerUrl.trim());
@@ -27,17 +39,23 @@ function encodeAgentName(agentName) {
 }
 
 export function getAgentCardUrl(agentName, options = {}) {
-    const routerUrl = stripTrailingSlash(options.routerUrl || getRouterUrl(options.env || process.env));
+    const env = options.env || process.env;
+    assertGeneratedLocalConsumerDisabled(env);
+    const routerUrl = stripTrailingSlash(options.routerUrl || getRouterUrl(env));
     return `${routerUrl}/${encodeAgentName(agentName)}/agent-card`;
 }
 
 export function getAgentCardsUrl(options = {}) {
-    const routerUrl = stripTrailingSlash(options.routerUrl || getRouterUrl(options.env || process.env));
+    const env = options.env || process.env;
+    assertGeneratedLocalConsumerDisabled(env);
+    const routerUrl = stripTrailingSlash(options.routerUrl || getRouterUrl(env));
     return `${routerUrl}/agent-card`;
 }
 
 export function getAgentChatCompletionsUrl(agentName, options = {}) {
-    const routerUrl = stripTrailingSlash(options.routerUrl || getRouterUrl(options.env || process.env));
+    const env = options.env || process.env;
+    assertGeneratedLocalConsumerDisabled(env);
+    const routerUrl = stripTrailingSlash(options.routerUrl || getRouterUrl(env));
     return `${routerUrl}/${encodeAgentName(agentName)}/v1/chat/completions`;
 }
 
@@ -201,7 +219,9 @@ async function* iterateSse(stream) {
 }
 
 export function createAgentHttpClient(options = {}) {
-    const routerUrl = stripTrailingSlash(options.routerUrl || getRouterUrl(options.env || process.env));
+    const runtimeEnv = () => options.env || process.env;
+    assertGeneratedLocalConsumerDisabled(runtimeEnv());
+    const routerUrl = stripTrailingSlash(options.routerUrl || getRouterUrl(runtimeEnv()));
     const requestHeaders = normalizeHeaders(options.requestHeaders || {});
     const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 0;
 
@@ -215,6 +235,7 @@ export function createAgentHttpClient(options = {}) {
     }
 
     async function agentCard(agentName, callOptions = {}) {
+        assertGeneratedLocalConsumerDisabled(runtimeEnv());
         const hasAgent = typeof agentName === 'string' && agentName.trim();
         const url = hasAgent
             ? getAgentCardUrl(agentName, { routerUrl })
@@ -233,6 +254,7 @@ export function createAgentHttpClient(options = {}) {
     }
 
     async function chatCompletions(agentName, payload = {}, callOptions = {}) {
+        assertGeneratedLocalConsumerDisabled(runtimeEnv());
         if (payload?.stream === true) {
             throw new Error('chatCompletions does not consume SSE responses; use chatCompletionsStream for stream:true requests.');
         }
@@ -251,6 +273,7 @@ export function createAgentHttpClient(options = {}) {
     }
 
     async function* chatCompletionsStream(agentName, payload = {}, callOptions = {}) {
+        assertGeneratedLocalConsumerDisabled(runtimeEnv());
         const streamPayload = { ...(payload || {}), stream: true };
         const body = JSON.stringify(streamPayload);
         const response = await requestStream(getAgentChatCompletionsUrl(agentName, { routerUrl }), {

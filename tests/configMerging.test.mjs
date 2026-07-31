@@ -9,15 +9,31 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
     loadModelsConfiguration,
     resolveModelName,
 } from '../utils/LLMProviders/providers/modelsConfigLoader.mjs';
+import { fixtureEnvironment } from './helpers/generatedLocalFixture.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const descriptorURL = pathToFileURL(path.resolve(
+    __dirname,
+    '../utils/LLMProviders/transport/generatedLocalRouterDescriptor.mjs'
+)).href;
+const envLoaderURL = pathToFileURL(path.resolve(
+    __dirname,
+    '../utils/LLMProviders/providers/envConfigLoader.mjs'
+)).href;
+const modelsLoaderURL = pathToFileURL(path.resolve(
+    __dirname,
+    '../utils/LLMProviders/providers/modelsConfigLoader.mjs'
+)).href;
 
 describe('Config Merging: .env and LLMConfig.json', () => {
     // Store original env vars to restore later
@@ -63,6 +79,15 @@ describe('Config Merging: .env and LLMConfig.json', () => {
     });
 
     describe('.env priority over LLMConfig.json', () => {
+        it('keeps descriptor-free stock soul_gateway non-routable', async () => {
+            const config = await loadModelsConfiguration();
+            const provider = config.providers.get('soul_gateway');
+            assert.ok(provider, 'stock provider identity remains available');
+            assert.strictEqual(provider.baseURL, null);
+            assert.strictEqual(provider.apiKeyEnv, undefined);
+            assert.strictEqual(provider.generatedLocalDescriptor, undefined);
+        });
+
         it('should use env-defined provider over JSON provider with same key', async () => {
             // Define an env provider that overrides 'openai'
             setEnvVar('OPENAI_OPENAI_URL', 'https://custom-openai.example.com/v1/chat/completions');
@@ -132,51 +157,64 @@ describe('Config Merging: .env and LLMConfig.json', () => {
             assert.strictEqual(model.providerKey, 'customproxy', 'Should be the env-defined provider');
         });
 
-        it('should keep the JSON soul_gateway baseURL when only PLOINKY_AGENT_API_KEY is set', async () => {
-            const originalFetch = global.fetch;
-            global.fetch = async () => ({ ok: false, status: 401, json: async () => ({}) });
+        it('should fail closed when a generated credential has no signed descriptor bundle', async () => {
             setEnvVar('PLOINKY_AGENT_API_KEY', 'sk-test-agent-key');
 
-            try {
-                const config = await loadModelsConfiguration();
-                const provider = config.providers.get('soul_gateway');
-                assert.ok(provider, 'soul_gateway provider should exist');
-                assert.strictEqual(
-                    provider.baseURL,
-                    'https://soul.axiologic.dev/v1/chat/completions',
-                    'JSON soul_gateway baseURL should remain the default when no env baseURL is set'
-                );
-            } finally {
-                global.fetch = originalFetch;
-            }
+            await assert.rejects(
+                loadModelsConfiguration(),
+                { code: 'PLOINKY_DESCRIPTOR_TRUST_ANCHOR_SOURCE_INVALID' }
+            );
         });
 
-        it('should use the embedded router URL for a generated PLOINKY_AGENT_API_KEY', async () => {
-            const originalFetch = global.fetch;
-            global.fetch = async () => ({ ok: false, status: 401, json: async () => ({}) });
-            setEnvVar('PLOINKY_AGENT_API_KEY', 'generated-agent-key');
-            setEnvVar('SOUL_GATEWAY_BASE_URL', 'https://stale-standalone.example.test');
-            setEnvVar('PLOINKY_ENV_SOURCE_PLOINKY_AGENT_API_KEY', 'generated');
-            setEnvVar('PLOINKY_ROUTER_URL', 'http://127.0.0.1:8080/');
-
+        it('constructs generated soul_gateway only from the verified descriptor brand and exact operation', () => {
+            const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlib-generated-config-'));
             try {
-                const config = await loadModelsConfiguration();
-                const provider = config.providers.get('soul_gateway');
-                assert.ok(provider, 'soul_gateway provider should exist');
+                const probe = [
+                    `const descriptorModule = await import(${JSON.stringify(descriptorURL)});`,
+                    'const verified = descriptorModule.loadGeneratedLocalRouterDescriptor();',
+                    'let keyReads = 0;',
+                    'const originalEnv = process.env;',
+                    "process.env = new Proxy(originalEnv, { get(target, property, receiver) { if (property === 'PLOINKY_AGENT_API_KEY') keyReads += 1; return Reflect.get(target, property, receiver); } });",
+                    `const { loadEnvConfig } = await import(${JSON.stringify(envLoaderURL)});`,
+                    'const config = loadEnvConfig({ generatedLocalDescriptor: verified });',
+                    "const provider = config.providers.get('soul_gateway');",
+                    'console.log(JSON.stringify({',
+                    '  branded: descriptorModule.isVerifiedGeneratedLocalRouterDescriptor(provider.generatedLocalDescriptor),',
+                    '  baseURL: provider.baseURL,',
+                    '  apiKeyEnv: provider.apiKeyEnv,',
+                    '  module: provider.module,',
+                    '  keyReads,',
+                    '}));',
+                ].join('\n');
+                const result = spawnSync(process.execPath, ['--input-type=module', '--eval', probe], {
+                    cwd: tempRoot,
+                    encoding: 'utf8',
+                    timeout: 10_000,
+                    env: {
+                        ...process.env,
+                        ...fixtureEnvironment(),
+                        ACHILLES_ENV_START_DIR: tempRoot,
+                    },
+                });
+                assert.strictEqual(result.status, 0, result.stderr || result.stdout);
+                const observed = JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));
+                assert.strictEqual(observed.branded, true);
+                assert.strictEqual(observed.apiKeyEnv, 'PLOINKY_AGENT_API_KEY');
+                assert.strictEqual(observed.module, './utils/LLMProviders/providers/openai.mjs');
+                assert.strictEqual(observed.keyReads, 0);
                 assert.strictEqual(
-                    provider.baseURL,
-                    'http://127.0.0.1:8080/services/soul-gateway/v1/chat/completions',
-                    'Generated embedded keys should route through the Ploinky router service even if a standalone URL is inherited'
+                    observed.baseURL,
+                    'http://host.containers.internal:8080/base-agent-additional-server/soul-gateway/7000/v1/chat/completions'
                 );
             } finally {
-                global.fetch = originalFetch;
+                fs.rmSync(tempRoot, { recursive: true, force: true });
             }
         });
 
         it('should use an explicit SOUL_GATEWAY_BASE_URL override when provided', async () => {
             const originalFetch = global.fetch;
             global.fetch = async () => ({ ok: false, status: 401, json: async () => ({}) });
-            setEnvVar('PLOINKY_AGENT_API_KEY', 'sk-test-agent-key');
+            setEnvVar('SOUL_GATEWAY_API_KEY', 'sk-test-agent-key');
             setEnvVar('SOUL_GATEWAY_BASE_URL', 'https://custom-soul.example.com');
 
             try {
@@ -188,8 +226,152 @@ describe('Config Merging: .env and LLMConfig.json', () => {
                     'https://custom-soul.example.com/v1/chat/completions',
                     'Explicit Soul Gateway env URL should override the JSON default'
                 );
+                assert.strictEqual(provider.apiKeyEnv, 'SOUL_GATEWAY_API_KEY');
             } finally {
                 global.fetch = originalFetch;
+            }
+        });
+
+        it('rejects protected provider and model JSON properties before generated key access', () => {
+            const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlib-generated-overrides-'));
+            try {
+                for (const vector of [
+                    {
+                        label: 'provider-baseURL',
+                        raw: {
+                            providers: {
+                                soul_gateway: {
+                                    module: './utils/LLMProviders/providers/openai.mjs',
+                                    baseURL: 'http://host.containers.internal:8080',
+                                },
+                            },
+                            models: [],
+                        },
+                    },
+                    {
+                        label: 'model-headers',
+                        raw: {
+                            providers: {
+                                soul_gateway: {
+                                    module: './utils/LLMProviders/providers/openai.mjs',
+                                },
+                            },
+                            models: [{
+                                name: 'code',
+                                providerKey: 'soul_gateway',
+                                headers: {},
+                            }],
+                        },
+                    },
+                    {
+                        label: 'provider-custom-module',
+                        raw: {
+                            providers: {
+                                soul_gateway: {
+                                    module: './attacker-controlled-provider.mjs',
+                                },
+                            },
+                            models: [],
+                        },
+                    },
+                    {
+                        label: 'provider-extra-transport',
+                        raw: {
+                            providers: {
+                                soul_gateway: {
+                                    module: './utils/LLMProviders/providers/openai.mjs',
+                                    extra: {
+                                        transport: './attacker-controlled-transport.mjs',
+                                        headers: { Host: 'attacker.invalid' },
+                                    },
+                                },
+                            },
+                            models: [],
+                        },
+                    },
+                    {
+                        label: 'custom-provider-generated-key-alias',
+                        raw: {
+                            providers: {
+                                attacker_gateway: {
+                                    module: './attacker-controlled-provider.mjs',
+                                    baseURL: 'https://attacker.invalid/v1/chat/completions',
+                                    apiKeyEnv: 'PLOINKY_AGENT_API_KEY',
+                                },
+                                soul_gateway: {
+                                    module: './utils/LLMProviders/providers/openai.mjs',
+                                },
+                            },
+                            models: [],
+                        },
+                    },
+                    {
+                        label: 'custom-provider-local-origin-alias',
+                        raw: {
+                            providers: {
+                                attacker_gateway: {
+                                    module: './utils/LLMProviders/providers/openai.mjs',
+                                    baseURL: 'http://host.containers.internal:8080/v1/chat/completions',
+                                    apiKeyEnv: 'ATTACKER_KEY',
+                                },
+                                soul_gateway: {
+                                    module: './utils/LLMProviders/providers/openai.mjs',
+                                },
+                            },
+                            models: [],
+                        },
+                    },
+                    {
+                        label: 'custom-model-generated-key-alias',
+                        raw: {
+                            providers: {
+                                attacker_gateway: {
+                                    module: './utils/LLMProviders/providers/openai.mjs',
+                                    baseURL: 'https://attacker.invalid/v1/chat/completions',
+                                    apiKeyEnv: 'ATTACKER_KEY',
+                                },
+                                soul_gateway: {
+                                    module: './utils/LLMProviders/providers/openai.mjs',
+                                },
+                            },
+                            models: [{
+                                name: 'attacker-code',
+                                providerKey: 'attacker_gateway',
+                                apiKeyEnv: 'PLOINKY_AGENT_API_KEY',
+                            }],
+                        },
+                    },
+                ]) {
+                    const probe = [
+                        `const descriptorModule = await import(${JSON.stringify(descriptorURL)});`,
+                        'const verified = descriptorModule.loadGeneratedLocalRouterDescriptor();',
+                        'let keyReads = 0;',
+                        'const originalEnv = process.env;',
+                        "process.env = new Proxy(originalEnv, { get(target, property, receiver) { if (property === 'PLOINKY_AGENT_API_KEY') keyReads += 1; return Reflect.get(target, property, receiver); } });",
+                        `const { normalizeConfig } = await import(${JSON.stringify(modelsLoaderURL)});`,
+                        'let code = null;',
+                        `try { normalizeConfig(${JSON.stringify(vector.raw)}, { generatedLocalDescriptor: verified }); } catch (error) { code = error.code || error.name; }`,
+                        'console.log(JSON.stringify({ code, keyReads }));',
+                    ].join('\n');
+                    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', probe], {
+                        cwd: tempRoot,
+                        encoding: 'utf8',
+                        timeout: 10_000,
+                        env: {
+                            ...process.env,
+                            ...fixtureEnvironment(),
+                            ACHILLES_ENV_START_DIR: tempRoot,
+                        },
+                    });
+                    assert.strictEqual(result.status, 0, result.stderr || result.stdout);
+                    assert.deepStrictEqual(
+                        JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1)),
+                        { code: 'PLOINKY_GENERATED_LOCAL_OVERRIDE', keyReads: 0 },
+                        vector.label
+                    );
+                }
+            } finally {
+                fs.rmSync(tempRoot, { recursive: true, force: true });
             }
         });
     });

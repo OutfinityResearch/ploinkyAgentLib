@@ -94,6 +94,7 @@ const CASES_DIR = path.join(__dirname, 'cases');
 // Dynamically import after env config
 const { LLMAgent } = await import('../../LLMAgents/LLMAgent.mjs');
 const { loadModelsConfiguration } = await import('../../utils/LLMClient.mjs');
+const { getProviderCredentialAvailability } = await import('../../utils/LLMProviders/transport/generatedLocalRouterDescriptor.mjs');
 const { buildDetectIntentsPrompt } = await import('../../LLMAgents/prompts.mjs');
 
 const COLORS = {
@@ -410,14 +411,13 @@ function getAvailableModels(modelsConfig, requestedModels) {
         const providerConfig = modelsConfig.providers.get(descriptor.providerKey);
         if (!providerConfig) continue;
 
-        // Check if API key is available
-        // soul_gateway models use PLOINKY_AGENT_API_KEY
-        const apiKeyEnv = descriptor.providerKey === 'soul_gateway'
-            ? 'PLOINKY_AGENT_API_KEY'
-            : (descriptor.apiKeyEnv || providerConfig.apiKeyEnv);
-        const apiKey = apiKeyEnv ? process.env[apiKeyEnv] : null;
-
-        if (!apiKey) continue;
+        // Generated-local availability is represented only by the private
+        // descriptor brand. Its credential is read later by the certified
+        // LLMClient request path after request-time revalidation.
+        const apiKeyEnv = descriptor.apiKeyEnv || providerConfig.apiKeyEnv;
+        const credentialAvailability = getProviderCredentialAvailability(providerConfig, apiKeyEnv);
+        if (credentialAvailability !== 'generated-local'
+            && credentialAvailability !== 'available') continue;
 
         // Build qualified name for matching (provider/model)
         const qualifiedName = `${descriptor.providerKey}/${name}`;
@@ -823,7 +823,9 @@ async function main() {
             if (descriptor.tier !== 'deep') continue;
             const providerConfig = modelsConfig.providers.get(descriptor.providerKey);
             const apiKeyEnv = descriptor.apiKeyEnv || providerConfig?.apiKeyEnv || 'N/A';
-            const hasKey = apiKeyEnv !== 'N/A' && process.env[apiKeyEnv] ? '✓' : '✗';
+            const credentialAvailability = getProviderCredentialAvailability(providerConfig, apiKeyEnv);
+            const hasKey = credentialAvailability === 'generated-local'
+                || credentialAvailability === 'available' ? '✓' : '✗';
             console.log(`  ${hasKey} ${name} (${apiKeyEnv})`);
         }
         return;

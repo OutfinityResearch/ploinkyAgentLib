@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import https from 'node:https';
 
 import {
     createAgentHttpClient,
@@ -30,12 +31,8 @@ function readJsonBody(req) {
 
 test('AgentHttpClient resolves router and agent endpoint URLs', () => {
     assert.equal(
-        getRouterUrl({ PLOINKY_ROUTER_URL: 'http://router.test:9999/' }),
-        'http://router.test:9999'
-    );
-    assert.equal(
-        getRouterUrl({ PLOINKY_ROUTER_HOST: 'host.containers.internal', PLOINKY_ROUTER_PORT: '8097' }),
-        'http://host.containers.internal:8097'
+        getRouterUrl({}),
+        'http://127.0.0.1:8080'
     );
     assert.equal(
         getAgentChatCompletionsUrl('openaiAgent', { routerUrl: 'http://127.0.0.1:8080/' }),
@@ -49,6 +46,84 @@ test('AgentHttpClient resolves router and agent endpoint URLs', () => {
         getAgentCardsUrl({ routerUrl: 'http://127.0.0.1:8080/' }),
         'http://127.0.0.1:8080/agent-card'
     );
+    assert.equal(
+        getRouterUrl({
+            PLOINKY_AGENT_ID: 'agent:repo/name',
+            PLOINKY_AGENT_PRINCIPAL: 'agent:repo/name',
+            PLOINKY_AGENT_INSTANCE_ID: 'ordinary-instance',
+            PLOINKY_AGENT_ENABLE_GENERATION: 'ordinary-generation',
+        }),
+        'http://127.0.0.1:8080'
+    );
+});
+
+test('AgentHttpClient rejects partial and future generated-local signals before URL selection', () => {
+    for (const env of [
+        { PLOINKY_ROUTER_URL: 'http://host.containers.internal:8080' },
+        { PLOINKY_ROUTER_HOST: 'host.containers.internal' },
+        { PLOINKY_AGENT_API_KEY: 'must-not-be-used' },
+        { PLOINKY_ENV_SOURCE_PLOINKY_FUTURE_ROUTER_FIELD: 'generated' },
+    ]) {
+        assert.throws(
+            () => getRouterUrl(env),
+            { code: 'PLOINKY_GENERATED_LOCAL_CONSUMER_NOT_CERTIFIED' }
+        );
+        assert.throws(
+            () => getAgentCardUrl('openaiAgent', {
+                routerUrl: 'https://explicit-external.example',
+                env,
+            }),
+            { code: 'PLOINKY_GENERATED_LOCAL_CONSUMER_NOT_CERTIFIED' }
+        );
+    }
+});
+
+test('AgentHttpClient request-time safety gate performs zero key reads and zero socket creation', async (t) => {
+    const target = {};
+    let keyReads = 0;
+    const env = new Proxy(target, {
+        get(object, property, receiver) {
+            if (property === 'PLOINKY_AGENT_API_KEY') keyReads += 1;
+            return Reflect.get(object, property, receiver);
+        },
+    });
+    const client = createAgentHttpClient({
+        routerUrl: 'https://explicit-external.example',
+        env,
+    });
+
+    target.PLOINKY_ROUTER_DESCRIPTOR_FILE = '/run/ploinky/router-descriptor.json';
+    target.PLOINKY_AGENT_API_KEY = 'must-not-be-read';
+    let socketAttempts = 0;
+    const originalHttpRequest = http.request;
+    const originalHttpsRequest = https.request;
+    http.request = (...args) => {
+        socketAttempts += 1;
+        return originalHttpRequest(...args);
+    };
+    https.request = (...args) => {
+        socketAttempts += 1;
+        return originalHttpsRequest(...args);
+    };
+    t.after(() => {
+        http.request = originalHttpRequest;
+        https.request = originalHttpsRequest;
+    });
+
+    await assert.rejects(
+        client.agentCard('openaiAgent'),
+        { code: 'PLOINKY_GENERATED_LOCAL_CONSUMER_NOT_CERTIFIED' }
+    );
+    await assert.rejects(
+        client.chatCompletions('openaiAgent', { model: 'demo' }),
+        { code: 'PLOINKY_GENERATED_LOCAL_CONSUMER_NOT_CERTIFIED' }
+    );
+    await assert.rejects(
+        client.chatCompletionsStream('openaiAgent', { model: 'demo' }).next(),
+        { code: 'PLOINKY_GENERATED_LOCAL_CONSUMER_NOT_CERTIFIED' }
+    );
+    assert.equal(keyReads, 0);
+    assert.equal(socketAttempts, 0);
 });
 
 test('AgentHttpClient calls router agent-card and chat completions endpoints', async () => {

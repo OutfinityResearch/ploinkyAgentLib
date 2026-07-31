@@ -2,9 +2,17 @@ import { STATUS_CODES } from 'node:http';
 
 import { toOpenAIChatMessages } from '../messageAdapters/openAIChat.mjs';
 import { parseSSEStream } from './sseParser.mjs';
+import {
+    GENERATED_LOCAL_CHAT_PATH,
+    assertNoGeneratedLocalProtectedOverrides,
+    buildGeneratedLocalOperationURL,
+    isVerifiedGeneratedLocalRouterDescriptor,
+    refreshGeneratedLocalRouterDescriptor,
+} from '../transport/generatedLocalRouterDescriptor.mjs';
+import { routerHttpRequest } from '../transport/routerHttpTransport.mjs';
 
 function deriveProviderLabel(baseURL) {
-    const match = baseURL.match(/https?:\/\/api\.([^/]+)\/?/i);
+    const match = String(baseURL || '').match(/https?:\/\/api\.([^/]+)\/?/i);
     return match?.[1] || 'OpenAI';
 }
 
@@ -37,20 +45,97 @@ function buildHeaders({ apiKey, allowNoAuth = false, headers = {}, providerLabel
     };
 }
 
+function generatedLocalError(code, message) {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+}
+
+function validateGeneratedLocalRequest(options, { streaming = false } = {}) {
+    if (!Object.hasOwn(options, 'generatedLocalDescriptor')) {
+        return null;
+    }
+    assertNoGeneratedLocalProtectedOverrides(options, 'Generated-local direct call parameters');
+    const descriptorProperty = Object.getOwnPropertyDescriptor(options, 'generatedLocalDescriptor');
+    if (!descriptorProperty || !Object.hasOwn(descriptorProperty, 'value')) {
+        throw generatedLocalError(
+            'PLOINKY_GENERATED_LOCAL_OVERRIDE',
+            'Generated-local descriptor selection must be a plain data property.'
+        );
+    }
+    if (!isVerifiedGeneratedLocalRouterDescriptor(descriptorProperty.value)) {
+        throw generatedLocalError(
+            'PLOINKY_DESCRIPTOR_BRAND_INVALID',
+            'Generated-local direct calls require a verified descriptor brand.'
+        );
+    }
+    const paramsProperty = Object.getOwnPropertyDescriptor(options, 'params');
+    if (paramsProperty && !Object.hasOwn(paramsProperty, 'value')) {
+        throw generatedLocalError(
+            'PLOINKY_GENERATED_LOCAL_OVERRIDE',
+            'Generated-local request params must be a plain data property.'
+        );
+    }
+    if (paramsProperty?.value !== undefined) {
+        assertNoGeneratedLocalProtectedOverrides(paramsProperty.value, 'Generated-local request params');
+    }
+    const descriptor = refreshGeneratedLocalRouterDescriptor(
+        descriptorProperty.value
+    );
+    buildGeneratedLocalOperationURL(descriptor, GENERATED_LOCAL_CHAT_PATH);
+    if (streaming && descriptor.payload.localStreaming !== 'enabled') {
+        throw generatedLocalError(
+            'PLOINKY_LOCAL_STREAMING_NOT_CERTIFIED',
+            'Generated-local streaming is not certified for this Router descriptor.'
+        );
+    }
+
+    return descriptor;
+}
+
+function readGeneratedLocalCredential(descriptor) {
+    // Every descriptor, mirror, origin, operation, capability, override, and
+    // required request-field check runs before this generated credential lookup.
+    const apiKey = process.env.PLOINKY_AGENT_API_KEY;
+    if (!apiKey) {
+        throw generatedLocalError(
+            'PLOINKY_GENERATED_LOCAL_KEY_MISSING',
+            'Generated-local provider requires its runtime credential.'
+        );
+    }
+    return { descriptor, apiKey };
+}
+
+async function throwGeneratedLocalResponseError(response, providerLabel) {
+    const detail = await response.readErrorText();
+    const error = new Error(
+        `${providerLabel} API request failed: ${response.status} - ${response.statusText || STATUS_CODES[response.status] || 'Unknown Error'}${detail ? ` (${detail})` : ''}.`
+    );
+    error.status = response.status;
+    error.body = detail;
+    throw error;
+}
+
 export async function callLLM(chatContext, options) {
     if (!options || typeof options !== 'object') {
         throw new Error('OpenAI provider requires invocation options.');
     }
 
+    const generatedLocalDescriptor = validateGeneratedLocalRequest(options);
     const { model, apiKey, allowNoAuth = false, baseURL, signal, params, headers } = options;
-    const providerLabel = deriveProviderLabel(baseURL);
+    const providerLabel = generatedLocalDescriptor ? 'Soul Gateway' : deriveProviderLabel(baseURL);
     if (!model) {
         throw new Error(`${providerLabel} provider requires a model name.`);
     }
-    if (!baseURL) {
+    if (!generatedLocalDescriptor && !baseURL) {
         throw new Error(`${providerLabel} provider requires a baseURL.`);
     }
-    const requestHeaders = buildHeaders({ apiKey, allowNoAuth, headers, providerLabel });
+    const generatedLocal = generatedLocalDescriptor
+        ? readGeneratedLocalCredential(generatedLocalDescriptor)
+        : null;
+    const requestHeaders = generatedLocal
+        ? null
+        : buildHeaders({ apiKey, allowNoAuth, headers, providerLabel });
 
     const convertedContext = toOpenAIChatMessages(chatContext);
     const payload = {
@@ -61,15 +146,26 @@ export async function callLLM(chatContext, options) {
     if (params && typeof params === 'object') {
         Object.assign(payload, params);
     }
+    if (generatedLocal) payload.stream = false;
 
-    const response = await fetch(resolveChatCompletionsURL(baseURL), {
-        method: 'POST',
-        headers: requestHeaders,
-        body: JSON.stringify(payload),
-        signal,
-    });
+    const response = generatedLocal
+        ? await routerHttpRequest({
+            descriptor: generatedLocal.descriptor,
+            pathname: GENERATED_LOCAL_CHAT_PATH,
+            method: 'POST',
+            json: payload,
+            bearer: generatedLocal.apiKey,
+            signal,
+        })
+        : await fetch(resolveChatCompletionsURL(baseURL), {
+            method: 'POST',
+            headers: requestHeaders,
+            body: JSON.stringify(payload),
+            signal,
+        });
 
     if (!response.ok) {
+        if (generatedLocal) await throwGeneratedLocalResponseError(response, providerLabel);
         throw new Error(`${providerLabel} API request failed: ${response.status} - ${response.statusText || STATUS_CODES[response.status] || 'Unknown Error'}.`);
     }
 
@@ -97,11 +193,17 @@ export async function* callLLMStreaming(chatContext, options) {
         throw new Error('OpenAI provider requires invocation options.');
     }
 
+    const generatedLocalDescriptor = validateGeneratedLocalRequest(options, { streaming: true });
     const { model, apiKey, allowNoAuth = false, baseURL, signal, params, headers } = options;
-    const providerLabel = deriveProviderLabel(baseURL);
+    const providerLabel = generatedLocalDescriptor ? 'Soul Gateway' : deriveProviderLabel(baseURL);
     if (!model) throw new Error(`${providerLabel} provider requires a model name.`);
-    if (!baseURL) throw new Error(`${providerLabel} provider requires a baseURL.`);
-    const requestHeaders = buildHeaders({ apiKey, allowNoAuth, headers, providerLabel });
+    if (!generatedLocalDescriptor && !baseURL) throw new Error(`${providerLabel} provider requires a baseURL.`);
+    const generatedLocal = generatedLocalDescriptor
+        ? readGeneratedLocalCredential(generatedLocalDescriptor)
+        : null;
+    const requestHeaders = generatedLocal
+        ? null
+        : buildHeaders({ apiKey, allowNoAuth, headers, providerLabel });
 
     const convertedContext = toOpenAIChatMessages(chatContext);
     const payload = {
@@ -113,15 +215,27 @@ export async function* callLLMStreaming(chatContext, options) {
     if (params && typeof params === 'object') {
         Object.assign(payload, params);
     }
+    if (generatedLocal) payload.stream = true;
 
-    const response = await fetch(resolveChatCompletionsURL(baseURL), {
-        method: 'POST',
-        headers: requestHeaders,
-        body: JSON.stringify(payload),
-        signal,
-    });
+    const response = generatedLocal
+        ? await routerHttpRequest({
+            descriptor: generatedLocal.descriptor,
+            pathname: GENERATED_LOCAL_CHAT_PATH,
+            method: 'POST',
+            json: payload,
+            bearer: generatedLocal.apiKey,
+            signal,
+            accept: 'text/event-stream',
+        })
+        : await fetch(resolveChatCompletionsURL(baseURL), {
+            method: 'POST',
+            headers: requestHeaders,
+            body: JSON.stringify(payload),
+            signal,
+        });
 
     if (!response.ok) {
+        if (generatedLocal) await throwGeneratedLocalResponseError(response, providerLabel);
         throw new Error(`${providerLabel} API request failed: ${response.status} - ${response.statusText || STATUS_CODES[response.status] || 'Unknown Error'}.`);
     }
 

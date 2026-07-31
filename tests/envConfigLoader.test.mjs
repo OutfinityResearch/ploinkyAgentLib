@@ -178,6 +178,7 @@ describe('envConfigLoader', () => {
             'PLOINKY_AGENT_API_KEY',
             'PLOINKY_ENV_SOURCE_PLOINKY_AGENT_API_KEY',
             'PLOINKY_ROUTER_URL',
+            'SOUL_GATEWAY_API_KEY',
             'SOUL_GATEWAY_BASE_URL',
             'SOUL_GATEWAY_URL',
         ];
@@ -200,26 +201,38 @@ describe('envConfigLoader', () => {
             }
         });
 
-        it('uses PLOINKY_AGENT_API_KEY when it is set', () => {
+        it('fails closed when a reserved generated credential appears without a complete descriptor', () => {
             process.env.PLOINKY_AGENT_API_KEY = 'signed-subject-key';
 
-            const config = loadEnvConfig();
-
-            assert.ok(config.providers.has('soul_gateway'));
-            assert.strictEqual(config.providers.get('soul_gateway').apiKeyEnv, 'PLOINKY_AGENT_API_KEY');
+            assert.throws(
+                () => loadEnvConfig(),
+                { code: 'PLOINKY_DESCRIPTOR_TRUST_ANCHOR_SOURCE_INVALID' }
+            );
         });
 
-        it('routes through the embedded router when PLOINKY_AGENT_API_KEY is generated', () => {
+        it('fails closed on partial legacy generated-router markers instead of restoring a services URL', () => {
             process.env.PLOINKY_AGENT_API_KEY = 'signed-subject-key';
             process.env.PLOINKY_ENV_SOURCE_PLOINKY_AGENT_API_KEY = 'generated';
             process.env.PLOINKY_ROUTER_URL = 'http://127.0.0.1:8088';
 
-            const config = loadEnvConfig();
+            assert.throws(
+                () => loadEnvConfig(),
+                { code: 'PLOINKY_DESCRIPTOR_TRUST_ANCHOR_SOURCE_INVALID' }
+            );
+        });
 
+        it('preserves explicit external Soul Gateway URL and credentials without a descriptor bundle', () => {
+            process.env.SOUL_GATEWAY_API_KEY = 'external-soul-key';
+            process.env.SOUL_GATEWAY_BASE_URL = 'https://external-soul.example/v1';
+
+            const config = loadEnvConfig();
             const provider = config.providers.get('soul_gateway');
             assert.ok(provider);
-            assert.strictEqual(provider.apiKeyEnv, 'PLOINKY_AGENT_API_KEY');
-            assert.strictEqual(provider.baseURL, 'http://127.0.0.1:8088/services/soul-gateway/v1/chat/completions');
+            assert.strictEqual(provider.apiKeyEnv, 'SOUL_GATEWAY_API_KEY');
+            assert.strictEqual(
+                provider.baseURL,
+                'https://external-soul.example/v1/chat/completions'
+            );
         });
     });
 });

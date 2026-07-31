@@ -39,6 +39,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
+const { getProviderCredentialAvailability } = await import('../../utils/LLMProviders/transport/generatedLocalRouterDescriptor.mjs');
 
 // Self-contained tskill fixtures (copies of tskill.md from coral-agent skills)
 const TSKILL_FIXTURES_DIR = path.join(__dirname, 'tskillFixtures');
@@ -306,7 +307,9 @@ function getModelsToTest(modelsConfig, requestedModels, includeReference) {
         const providerConfig = modelsConfig.providers.get(descriptor.providerKey);
         if (!providerConfig) continue;
         const apiKeyEnv = descriptor.apiKeyEnv || providerConfig.apiKeyEnv;
-        if (!(apiKeyEnv ? process.env[apiKeyEnv] : null)) continue;
+        const credentialAvailability = getProviderCredentialAvailability(providerConfig, apiKeyEnv);
+        if (credentialAvailability !== 'generated-local'
+            && credentialAvailability !== 'available') continue;
         if (seen.has(name)) continue;
         seen.add(name);
         available.push({ name, provider: descriptor.providerKey, apiKeyEnv, isReference: referenceSet.has(name) });
@@ -315,7 +318,9 @@ function getModelsToTest(modelsConfig, requestedModels, includeReference) {
     // Pass 2: soul_gateway fallback for reference models
     const sgProvider = modelsConfig.providers.get('soul_gateway');
     const sgKeyEnv = sgProvider?.apiKeyEnv;
-    if (sgKeyEnv && process.env[sgKeyEnv]) {
+    const sgCredentialAvailability = getProviderCredentialAvailability(sgProvider, sgKeyEnv);
+    if (sgCredentialAvailability === 'generated-local'
+        || sgCredentialAvailability === 'available') {
         for (const [name, descriptor] of modelsConfig.models.entries()) {
             if (seen.has(name) || !isWanted(name, descriptor)) continue;
             seen.add(name);
@@ -568,7 +573,7 @@ ${COLORS.CYAN}Options:${COLORS.RESET}
     const availableModels = getModelsToTest(modelsConfig, config.models, config.includeReference);
 
     if (availableModels.length === 0) {
-        console.log(`${COLORS.RED}No models available. Set PLOINKY_AGENT_API_KEY.${COLORS.RESET}`);
+        console.log(`${COLORS.RED}No models available. Check the generated runtime descriptor or explicit provider credentials.${COLORS.RESET}`);
         return;
     }
 

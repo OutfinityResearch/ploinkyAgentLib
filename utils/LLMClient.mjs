@@ -2,6 +2,10 @@ import { loadModelsConfiguration, resolveModelName, parseModelReference } from '
 export { loadModelsConfiguration, resolveModelName, parseModelReference, modelsConfiguration };
 import { registerProvidersFromConfig } from './LLMProviders/providerBootstrap.mjs';
 import { ensureProvider } from './LLMProviders/providers/providerRegistry.mjs';
+import {
+    assertNoGeneratedLocalProtectedOverrides,
+    isVerifiedGeneratedLocalRouterDescriptor,
+} from './LLMProviders/transport/generatedLocalRouterDescriptor.mjs';
 const debugFlag = (process.env.ACHILLES_DEBUG ?? '').toLowerCase();
 const DEBUG_ENABLED = debugFlag === '1' || debugFlag === 'true';
 
@@ -26,6 +30,7 @@ function createAgentModelRecord(modelDescriptor, providerConfig) {
         sortOrder: modelDescriptor.sortOrder ?? 100,
         isFree: modelDescriptor.isFree || false,
         billingType: modelDescriptor.billingType || 'api_key',
+        generatedLocalDescriptor: providerConfig.generatedLocalDescriptor || null,
     };
 }
 
@@ -86,7 +91,9 @@ export function selectModelByTags(requestedTags) {
 
         // Check provider has API key available
         const keyEnv = record.apiKeyEnv;
-        if (keyEnv && !process.env[keyEnv]) continue;
+        if (!isVerifiedGeneratedLocalRouterDescriptor(record.generatedLocalDescriptor)
+            && keyEnv
+            && !process.env[keyEnv]) continue;
 
         let score = 0;
         for (const tag of requestedTags) {
@@ -306,9 +313,14 @@ async function callLLMWithModelInternal(modelName, historyArray, prompt, invocat
     }
 
     const externalSignal = invocationOptions.signal;
+    let externalAbortHandler = null;
     if (externalSignal && typeof externalSignal.addEventListener === 'function') {
-        const abortHandler = () => controller.abort();
-        externalSignal.addEventListener('abort', abortHandler, { once: true });
+        externalAbortHandler = () => controller.abort();
+        if (externalSignal.aborted) {
+            controller.abort();
+        } else {
+            externalSignal.addEventListener('abort', externalAbortHandler, { once: true });
+        }
     }
 
     try {
@@ -327,10 +339,34 @@ async function callLLMWithModelInternal(modelName, historyArray, prompt, invocat
             }
         }
 
+        const configuredLocalProvider = isVerifiedGeneratedLocalRouterDescriptor(
+            metadata?.provider?.generatedLocalDescriptor
+        );
+        const requestedProvider = Object.hasOwn(invocationOptions, 'providerKey')
+            ? modelsConfiguration.providers.get(invocationOptions.providerKey)
+            : null;
+        if (configuredLocalProvider
+            || isVerifiedGeneratedLocalRouterDescriptor(requestedProvider?.generatedLocalDescriptor)) {
+            assertNoGeneratedLocalProtectedOverrides(
+                invocationOptions,
+                'Generated-local invocation arguments'
+            );
+        }
+
         const providerKey = resolveProviderKey(modelName, invocationOptions, metadata)
             || inferredProviderKey;
         const provider = ensureProvider(providerKey);
         const providerConfig = metadata?.provider || modelsConfiguration.providers.get(providerKey) || null;
+
+        if (isVerifiedGeneratedLocalRouterDescriptor(providerConfig?.generatedLocalDescriptor)) {
+            const actualModelName = metadata?.model?.name || inferredModelName;
+            return await provider.callLLM(history, {
+                model: actualModelName,
+                signal: controller.signal,
+                params: invocationOptions.params || {},
+                generatedLocalDescriptor: providerConfig.generatedLocalDescriptor,
+            });
+        }
 
         const baseURL = invocationOptions.baseURL
             || metadata?.model?.baseURL
@@ -361,6 +397,9 @@ async function callLLMWithModelInternal(modelName, historyArray, prompt, invocat
     } catch (error) {
         throw error;
     } finally {
+        if (externalAbortHandler) {
+            externalSignal.removeEventListener?.('abort', externalAbortHandler);
+        }
         const index = llmCalls.indexOf(controller);
         if (index > -1) {
             llmCalls.splice(index, 1);
@@ -431,6 +470,28 @@ export function createDefaultLLMInvokerStrategy() {
         const matchedTags = collectMatchedTags(requestedTags, record, modelName);
         lastInvocationDetails = { model: null, requestedTags, matchedTags };
 
+        const qualifiedProvider = inferProviderKeyFromModelName(modelName);
+        const localRecord = isVerifiedGeneratedLocalRouterDescriptor(
+            record?.generatedLocalDescriptor
+        ) || isVerifiedGeneratedLocalRouterDescriptor(
+            modelsConfiguration.providers.get(qualifiedProvider)?.generatedLocalDescriptor
+        );
+
+        if (localRecord) {
+            assertNoGeneratedLocalProtectedOverrides(
+                invocationOptions,
+                'Generated-local invocationOptions'
+            );
+            const explicitOverrides = {};
+            for (const name of ['providerKey', 'apiKey', 'apiKeyEnv', 'baseURL', 'headers', 'transport']) {
+                if (Object.hasOwn(invocation, name)) explicitOverrides[name] = invocation[name];
+            }
+            assertNoGeneratedLocalProtectedOverrides(
+                explicitOverrides,
+                'Generated-local invocation'
+            );
+        }
+
         const mergedHeaders = { ...(invocationOptions.headers || {}), ...headers };
 
         // Merge reasoningEffort into params if specified
@@ -442,23 +503,23 @@ export function createDefaultLLMInvokerStrategy() {
         const invocationConfig = {
             ...invocationOptions,
             params: mergedParams,
-            headers: mergedHeaders,
+            ...(!localRecord ? { headers: mergedHeaders } : {}),
         };
 
-        if (invocation.providerKey) invocationConfig.providerKey = invocation.providerKey;
-        if (invocation.apiKey) invocationConfig.apiKey = invocation.apiKey;
-        if (invocation.apiKeyEnv) invocationConfig.apiKeyEnv = invocation.apiKeyEnv;
-        if (invocation.baseURL) invocationConfig.baseURL = invocation.baseURL;
+        if (!localRecord && invocation.providerKey) invocationConfig.providerKey = invocation.providerKey;
+        if (!localRecord && invocation.apiKey) invocationConfig.apiKey = invocation.apiKey;
+        if (!localRecord && invocation.apiKeyEnv) invocationConfig.apiKeyEnv = invocation.apiKeyEnv;
+        if (!localRecord && invocation.baseURL) invocationConfig.baseURL = invocation.baseURL;
         if (signal) invocationConfig.signal = signal;
 
         // Fill from record if not already set
-        if (!invocationConfig.providerKey && record?.providerKey) {
+        if (!localRecord && !invocationConfig.providerKey && record?.providerKey) {
             invocationConfig.providerKey = record.providerKey;
         }
-        if (!invocationConfig.baseURL && record?.baseURL) {
+        if (!localRecord && !invocationConfig.baseURL && record?.baseURL) {
             invocationConfig.baseURL = record.baseURL;
         }
-        if (!invocationConfig.apiKeyEnv && record?.apiKeyEnv) {
+        if (!localRecord && !invocationConfig.apiKeyEnv && record?.apiKeyEnv) {
             invocationConfig.apiKeyEnv = record.apiKeyEnv;
         }
 
@@ -467,7 +528,7 @@ export function createDefaultLLMInvokerStrategy() {
             || record?.providerKey
             || inferredProviderKey
             || null;
-        if (!invocationConfig.providerKey && resolvedProviderKey) {
+        if (!localRecord && !invocationConfig.providerKey && resolvedProviderKey) {
             invocationConfig.providerKey = resolvedProviderKey;
         }
 

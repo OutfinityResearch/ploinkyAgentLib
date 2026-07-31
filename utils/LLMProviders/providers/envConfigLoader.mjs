@@ -25,6 +25,14 @@
  * exists across multiple providers.
  */
 
+import {
+    GENERATED_LOCAL_CHAT_PATH,
+    assertVerifiedGeneratedLocalRouterDescriptor,
+    buildGeneratedLocalOperationURL,
+    hasGeneratedLocalDescriptorBundle,
+    loadGeneratedLocalRouterDescriptor,
+} from '../transport/generatedLocalRouterDescriptor.mjs';
+
 const API_TYPE_OPENAI = 'openai';
 const API_TYPE_ANTHROPIC = 'anthropic';
 const API_TYPE_GOOGLE = 'google';
@@ -39,6 +47,24 @@ const GOOGLE_MODULE = './utils/LLMProviders/providers/google.mjs';
 const HUGGINGFACE_MODULE = './utils/LLMProviders/providers/huggingFace.mjs';
 const COPILOT_MODULE = './utils/LLMProviders/providers/copilot.mjs';
 const KIRO_MODULE = './utils/LLMProviders/providers/kiro.mjs';
+
+function isGeneratedLocalEndpointAlias(raw, descriptor) {
+    if (typeof raw !== 'string' || !raw.trim() || !descriptor) return false;
+    try {
+        const candidate = new URL(raw);
+        return candidate.origin === descriptor.payload.physicalOrigin
+            || candidate.host === descriptor.payload.requestAuthority
+            || candidate.host === descriptor.payload.publicAuthority;
+    } catch {
+        return false;
+    }
+}
+
+function generatedLocalAliasError(description) {
+    const error = new Error(`${description} cannot alias the runtime-owned generated-local provider.`);
+    error.code = 'PLOINKY_GENERATED_LOCAL_OVERRIDE';
+    return error;
+}
 
 /**
  * Parse a model definition string.
@@ -98,23 +124,44 @@ function parseModelDefinition(value) {
  * 
  * @returns {Map<string, object>} Map of provider name to provider config
  */
-function parseProvidersFromEnv() {
+function parseProvidersFromEnv({ generatedLocalDescriptor = null } = {}) {
     const providers = new Map();
     const providerData = new Map(); // Collect partial data before building providers
+
+    if (generatedLocalDescriptor) {
+        assertVerifiedGeneratedLocalRouterDescriptor(generatedLocalDescriptor);
+        for (const name of ['SOUL_GATEWAY_API_KEY', 'SOUL_GATEWAY_BASE_URL', 'SOUL_GATEWAY_URL']) {
+            if (Object.hasOwn(process.env, name)) {
+                const error = new Error(`Generated-local provider cannot accept protected environment override "${name}".`);
+                error.code = 'PLOINKY_GENERATED_LOCAL_OVERRIDE';
+                throw error;
+            }
+        }
+        for (const name of Object.keys(process.env)) {
+            if (/^OPENAI_SOUL_GATEWAY_(?:URL|KEY|TOKEN|KEY_ENV)$/.test(name)) {
+                const error = new Error(`Generated-local provider cannot accept protected environment override "${name}".`);
+                error.code = 'PLOINKY_GENERATED_LOCAL_OVERRIDE';
+                throw error;
+            }
+        }
+    }
 
     // Patterns to match
     const urlPattern = /^(OPENAI|ANTHROPIC|GOOGLE|HUGGINGFACE|COPILOT|KIRO)_([A-Z][A-Z0-9_]*)_URL$/;
     const keyPattern = /^(OPENAI|ANTHROPIC|GOOGLE|HUGGINGFACE|COPILOT|KIRO)_([A-Z][A-Z0-9_]*)_(KEY|TOKEN)$/;
     const keyEnvPattern = /^(OPENAI|ANTHROPIC|GOOGLE|HUGGINGFACE|COPILOT|KIRO)_([A-Z][A-Z0-9_]*)_KEY_ENV$/;
 
-    for (const [envKey, envValue] of Object.entries(process.env)) {
-        if (!envValue) continue;
-
+    // Match names before reading values. In generated mode this is essential:
+    // enumerating Object.entries(process.env) would read the runtime API key
+    // during provider construction.
+    for (const envKey of Object.keys(process.env)) {
         let match;
 
         // Check for URL
         match = envKey.match(urlPattern);
         if (match) {
+            const envValue = process.env[envKey];
+            if (!envValue) continue;
             const [, apiType, providerName] = match;
             const key = `${apiType}_${providerName}`;
             if (!providerData.has(key)) {
@@ -127,6 +174,8 @@ function parseProvidersFromEnv() {
         // Check for KEY_ENV (must check before KEY)
         match = envKey.match(keyEnvPattern);
         if (match) {
+            const envValue = process.env[envKey];
+            if (!envValue) continue;
             const [, apiType, providerName] = match;
             const key = `${apiType}_${providerName}`;
             if (!providerData.has(key)) {
@@ -139,6 +188,8 @@ function parseProvidersFromEnv() {
         // Check for KEY (direct key value)
         match = envKey.match(keyPattern);
         if (match) {
+            const envValue = process.env[envKey];
+            if (!envValue) continue;
             const [, apiType, providerName] = match;
             const key = `${apiType}_${providerName}`;
             if (!providerData.has(key)) {
@@ -159,6 +210,17 @@ function parseProvidersFromEnv() {
 
         const providerKey = data.providerName.toLowerCase();
         const apiType = data.apiType.toLowerCase();
+
+        if (generatedLocalDescriptor && providerKey === 'soul_gateway') {
+            const error = new Error('Generated-local provider cannot accept OPENAI_SOUL_GATEWAY_* environment overrides.');
+            error.code = 'PLOINKY_GENERATED_LOCAL_OVERRIDE';
+            throw error;
+        }
+        if (generatedLocalDescriptor
+            && (data.apiKeyEnv === 'PLOINKY_AGENT_API_KEY'
+                || isGeneratedLocalEndpointAlias(data.baseURL, generatedLocalDescriptor))) {
+            throw generatedLocalAliasError(`Environment provider "${providerKey}"`);
+        }
 
         // Determine the module based on API type
         const module = resolveModuleForApiType(apiType);
@@ -228,12 +290,28 @@ function parseProvidersFromEnv() {
         baseURL: process.env.KIRO_BASE_URL || 'https://api.kiro.dev',
     });
 
-    addDirectProvider(providers, {
-        providerKey: 'soul_gateway',
-        apiType: API_TYPE_SOUL_GATEWAY,
-        envNames: resolveSoulGatewayEnvNames(),
-        baseURL: resolveSoulGatewayBaseURL(),
-    });
+    if (generatedLocalDescriptor) {
+        providers.set('soul_gateway', {
+            name: 'soul_gateway',
+            providerKey: 'soul_gateway',
+            apiKeyEnv: 'PLOINKY_AGENT_API_KEY',
+            baseURL: buildGeneratedLocalOperationURL(
+                generatedLocalDescriptor,
+                GENERATED_LOCAL_CHAT_PATH
+            ).href,
+            module: OPENAI_MODULE,
+            apiType: API_TYPE_SOUL_GATEWAY,
+            fromEnv: true,
+            generatedLocalDescriptor,
+        });
+    } else {
+        addDirectProvider(providers, {
+            providerKey: 'soul_gateway',
+            apiType: API_TYPE_SOUL_GATEWAY,
+            envNames: resolveSoulGatewayEnvNames(),
+            baseURL: resolveSoulGatewayBaseURL(),
+        });
+    }
 
     return providers;
 }
@@ -282,27 +360,11 @@ function addDirectProvider(providers, { providerKey, apiType, envNames, baseURL 
     providers.set(providerKey, providerRecord);
 }
 
-function envSource(name) {
-    return String(process.env[`PLOINKY_ENV_SOURCE_${name}`] || '').trim();
-}
-
 function resolveSoulGatewayEnvNames() {
-    return ['PLOINKY_AGENT_API_KEY'];
+    return ['SOUL_GATEWAY_API_KEY'];
 }
 
 function resolveSoulGatewayBaseURL() {
-    const agentKeySource = envSource('PLOINKY_AGENT_API_KEY');
-    const isGenerated = agentKeySource === 'generated';
-    // Generated embedded keys must stay paired with the embedded router service.
-    if (isGenerated) {
-        const routerURL = String(process.env.PLOINKY_ROUTER_URL || '').trim();
-        if (!routerURL) {
-            return null;
-        }
-        const trimmedRouterURL = routerURL.replace(/\/+$/, '');
-        return `${trimmedRouterURL}/services/soul-gateway/v1/chat/completions`;
-    }
-
     const raw = process.env.SOUL_GATEWAY_BASE_URL || process.env.SOUL_GATEWAY_URL;
     if (!raw || !String(raw).trim()) {
         return null;
@@ -331,11 +393,11 @@ function parseModelsFromEnv() {
     // Pattern: LLM_MODEL_<anything> (typically numbered like LLM_MODEL_01)
     const modelPattern = /^LLM_MODEL_(.+)$/;
 
-    for (const [envKey, envValue] of Object.entries(process.env)) {
-        if (!envValue) continue;
-
+    for (const envKey of Object.keys(process.env)) {
         const match = envKey.match(modelPattern);
         if (match) {
+            const envValue = process.env[envKey];
+            if (!envValue) continue;
             const suffix = match[1];
             const parsed = parseModelDefinition(envValue);
             if (parsed) {
@@ -432,10 +494,16 @@ export function parseModelList(value) {
  * 
  * @returns {object} { providers: Map, models: Array, issues: { errors: [], warnings: [] } }
  */
-export function loadEnvConfig() {
+export function loadEnvConfig(options = {}) {
     const issues = { errors: [], warnings: [] };
 
-    const providers = parseProvidersFromEnv();
+    const generatedLocalDescriptor = Object.hasOwn(options, 'generatedLocalDescriptor')
+        ? options.generatedLocalDescriptor
+        : hasGeneratedLocalDescriptorBundle(process.env)
+            ? loadGeneratedLocalRouterDescriptor()
+            : null;
+
+    const providers = parseProvidersFromEnv({ generatedLocalDescriptor });
     const models = parseModelsFromEnv();
 
     // Validate that models reference known providers

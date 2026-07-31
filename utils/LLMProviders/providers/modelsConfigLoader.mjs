@@ -3,6 +3,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnvConfig, parseModelReference } from './envConfigLoader.mjs';
 import { discoverModels } from './gatewayDiscovery.mjs';
+import {
+    assertNoGeneratedLocalProtectedOverrides,
+    hasGeneratedLocalDescriptorBundle,
+    isGeneratedLocalRuntimeName,
+    isVerifiedGeneratedLocalRouterDescriptor,
+    loadGeneratedLocalRouterDescriptor,
+} from '../transport/generatedLocalRouterDescriptor.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,23 +18,63 @@ function envSourceMetadataName(name) {
     return `PLOINKY_ENV_SOURCE_${String(name || '').replace(/[^A-Za-z0-9_]/g, '_')}`;
 }
 
-function shouldSetEnvFromDotEnv(key) {
+function shouldSetEnvFromDotEnv(key, env = process.env) {
     if (!key) {
         return false;
     }
-    if (!process.env[key]) {
+    if (!env[key]) {
         return true;
     }
-    return process.env[envSourceMetadataName(key)] === 'generated';
+    return env[envSourceMetadataName(key)] === 'generated';
 }
 
-function markDotEnvSource(key) {
-    if (!key || key.startsWith('PLOINKY_ENV_SOURCE_')) {
+export class DotEnvProvenanceError extends Error {
+    constructor(key) {
+        super(`Project .env cannot define runtime-owned generated-local name "${key}".`);
+        this.name = 'DotEnvProvenanceError';
+        this.code = 'PLOINKY_DOTENV_RUNTIME_NAME_REJECTED';
+        this.key = key;
+    }
+}
+
+export function parseDotEnvEntries(content) {
+    const entries = [];
+    for (const rawLine of String(content).split('\n')) {
+        let trimmed = rawLine.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        if (trimmed.startsWith('export ')) trimmed = trimmed.slice(7).trim();
+        const eq = trimmed.indexOf('=');
+        if (eq === -1) continue;
+        const key = trimmed.slice(0, eq).trim();
+        let value = trimmed.slice(eq + 1).trim();
+        if ((value.startsWith('"') && value.endsWith('"'))
+            || (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.slice(1, -1);
+        }
+        entries.push([key, value]);
+    }
+    return entries;
+}
+
+export function applyDotEnvEntries(entries, env = process.env) {
+    for (const [key] of entries) {
+        if (isGeneratedLocalRuntimeName(key)) throw new DotEnvProvenanceError(key);
+    }
+    for (const [key, value] of entries) {
+        if (shouldSetEnvFromDotEnv(key, env)) {
+            env[key] = value;
+            markDotEnvSource(key, env);
+        }
+    }
+}
+
+function markDotEnvSource(key, env = process.env) {
+    if (!key || key.startsWith('PLOINKY_')) {
         return;
     }
     const sourceName = envSourceMetadataName(key);
-    if (!process.env[sourceName] || process.env[sourceName] === 'generated') {
-        process.env[sourceName] = 'explicit';
+    if (!env[sourceName] || env[sourceName] === 'generated') {
+        env[sourceName] = 'explicit';
     }
 }
 
@@ -61,8 +108,8 @@ function resolveDotEnvStartDir() {
 /**
  * Walk up from startDir to filesystem root looking for a .env file.
  * When found, parse KEY=VALUE lines and populate process.env. Existing
- * operator values are preserved, but generated Ploinky aliases may be
- * replaced by the nearest project .env.
+ * operator values are preserved. Runtime-owned generated-local names reject
+ * the whole file before any entry is applied.
  */
 function loadDotEnvWalkUp(startDir) {
     let dir = path.resolve(startDir);
@@ -73,24 +120,10 @@ function loadDotEnvWalkUp(startDir) {
         if (fs.existsSync(candidate)) {
             try {
                 const content = fs.readFileSync(candidate, 'utf8');
-                for (const rawLine of content.split('\n')) {
-                    let trimmed = rawLine.trim();
-                    if (!trimmed || trimmed.startsWith('#')) continue;
-                    if (trimmed.startsWith('export ')) trimmed = trimmed.slice(7).trim();
-                    const eq = trimmed.indexOf('=');
-                    if (eq === -1) continue;
-                    const key = trimmed.slice(0, eq).trim();
-                    let val = trimmed.slice(eq + 1).trim();
-                    if ((val.startsWith('"') && val.endsWith('"')) ||
-                        (val.startsWith("'") && val.endsWith("'"))) {
-                        val = val.slice(1, -1);
-                    }
-                    if (shouldSetEnvFromDotEnv(key)) {
-                        process.env[key] = val;
-                        markDotEnvSource(key);
-                    }
-                }
-            } catch {
+                const entries = parseDotEnvEntries(content);
+                applyDotEnvEntries(entries);
+            } catch (error) {
+                if (error instanceof DotEnvProvenanceError) throw error;
                 // silently ignore read errors
             }
             return;
@@ -106,6 +139,25 @@ loadDotEnvWalkUp(resolveDotEnvStartDir());
 
 const DEFAULT_CONFIG_FILENAME = 'LLMConfig.json';
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '../../../', DEFAULT_CONFIG_FILENAME);
+const GENERATED_LOCAL_PROVIDER_MODULE = './utils/LLMProviders/providers/openai.mjs';
+
+function generatedLocalAliasError(description) {
+    const error = new Error(`${description} cannot alias the runtime-owned generated-local provider.`);
+    error.code = 'PLOINKY_GENERATED_LOCAL_OVERRIDE';
+    return error;
+}
+
+function isGeneratedLocalEndpointAlias(raw, descriptor) {
+    if (typeof raw !== 'string' || !raw.trim() || !descriptor) return false;
+    try {
+        const candidate = new URL(raw);
+        return candidate.origin === descriptor.payload.physicalOrigin
+            || candidate.host === descriptor.payload.requestAuthority
+            || candidate.host === descriptor.payload.publicAuthority;
+    } catch {
+        return false;
+    }
+}
 
 // Re-export for use by other modules
 export { parseModelReference } from './envConfigLoader.mjs';
@@ -224,6 +276,26 @@ function normalizeProvider(providerKey, entry, issues, options) {
     }
 
     const config = entry && typeof entry === 'object' ? entry : {};
+    if (options.generatedLocalDescriptor
+        && providerKey !== 'soul_gateway'
+        && (config.apiKeyEnv === 'PLOINKY_AGENT_API_KEY'
+            || isGeneratedLocalEndpointAlias(config.baseURL, options.generatedLocalDescriptor))) {
+        throw generatedLocalAliasError(`Provider JSON "${providerKey}"`);
+    }
+    if (providerKey === 'soul_gateway' && options.generatedLocalDescriptor) {
+        assertNoGeneratedLocalProtectedOverrides(config, 'Generated-local provider JSON');
+        if (Object.hasOwn(config, 'module')
+            && config.module !== GENERATED_LOCAL_PROVIDER_MODULE) {
+            const error = new Error('Generated-local provider JSON cannot replace its authority-aware OpenAI module.');
+            error.code = 'PLOINKY_GENERATED_LOCAL_OVERRIDE';
+            throw error;
+        }
+        if (Object.hasOwn(config, 'extra')) {
+            const error = new Error('Generated-local provider JSON cannot define an extensible extra configuration bag.');
+            error.code = 'PLOINKY_GENERATED_LOCAL_OVERRIDE';
+            throw error;
+        }
+    }
     const apiKeyEnv = config.apiKeyEnv;
     if (!apiKeyEnv) {
         issues.warnings.push(`Provider "${providerKey}" does not declare apiKeyEnv.`);
@@ -268,9 +340,20 @@ function normalizeModel(entry, providers, issues, options) {
         return null;
     }
 
+    if (options.generatedLocalDescriptor
+        && providerKey !== 'soul_gateway'
+        && (apiKeyEnvOverride === 'PLOINKY_AGENT_API_KEY'
+            || isGeneratedLocalEndpointAlias(baseURLOverride, options.generatedLocalDescriptor))) {
+        throw generatedLocalAliasError(`Model JSON "${modelName}"`);
+    }
+
     if (!providerKey) {
         issues.errors.push(`Model "${modelName}" is missing provider reference.`);
         return null;
+    }
+
+    if (providerKey === 'soul_gateway' && options.generatedLocalDescriptor) {
+        assertNoGeneratedLocalProtectedOverrides(entry, `Generated-local model JSON "${modelName}"`);
     }
 
     if (!providers.has(providerKey)) {
@@ -329,13 +412,15 @@ function mergeEnvConfig(normalized, envConfig) {
     // Merge env providers (they take precedence over JSON)
     for (const [providerKey, envProvider] of envConfig.providers.entries()) {
         if (providers.has(providerKey)) {
-            // Override existing provider, but preserve the JSON-defined module
-            // path when present. The env config loader always assigns a generic
-            // module (openai.mjs or anthropic.mjs) because it cannot infer
-            // custom provider modules from env vars alone.
             const existing = providers.get(providerKey);
-            const merged = { ...existing, ...envProvider };
-            if (existing.module) {
+            const generatedLocal = isVerifiedGeneratedLocalRouterDescriptor(
+                envProvider.generatedLocalDescriptor
+            );
+            // A generated-local provider is wholly producer-owned. In
+            // particular, never preserve a project JSON module or extensible
+            // `extra` state that could bypass the authority-aware transport.
+            const merged = generatedLocal ? { ...envProvider } : { ...existing, ...envProvider };
+            if (!generatedLocal && existing.module) {
                 merged.module = existing.module;
             }
             providers.set(providerKey, merged);
@@ -450,7 +535,12 @@ async function discoverGatewayModels(normalized) {
     // If soul_gateway API key is set, discover only from soul_gateway
     // (it proxies all upstream providers, so no need to call them individually)
     const soulGateway = providers.get('soul_gateway');
-    const soulGatewayKeySet = soulGateway?.apiKeyEnv && process.env[soulGateway.apiKeyEnv];
+    const generatedSoulGateway = isVerifiedGeneratedLocalRouterDescriptor(
+        soulGateway?.generatedLocalDescriptor
+    );
+    const soulGatewayKeySet = generatedSoulGateway
+        ? true
+        : soulGateway?.apiKeyEnv && process.env[soulGateway.apiKeyEnv];
 
     const discoveryProviders = [];
     if (soulGatewayKeySet) {
@@ -525,18 +615,22 @@ async function discoverGatewayModels(normalized) {
 }
 
 export async function loadModelsConfiguration(options = {}) {
+    const generatedLocalDescriptor = hasGeneratedLocalDescriptorBundle(process.env)
+        ? loadGeneratedLocalRouterDescriptor()
+        : null;
     const configPath = options.configPath
         || process.env.LLM_MODELS_CONFIG_PATH
         || DEFAULT_CONFIG_PATH;
     const { raw, issues: loadIssues } = loadRawConfig(configPath);
-    const normalized = normalizeConfig(raw, options);
+    const normalizationOptions = { ...options, generatedLocalDescriptor };
+    const normalized = normalizeConfig(raw, normalizationOptions);
 
     normalized.issues.errors.push(...loadIssues.errors);
     normalized.issues.warnings.push(...loadIssues.warnings);
     normalized.path = configPath;
 
     // Load and merge environment-defined providers and models
-    const envConfig = loadEnvConfig();
+    const envConfig = loadEnvConfig({ generatedLocalDescriptor });
     mergeEnvConfig(normalized, envConfig);
 
     // Discover models from gateway providers
