@@ -1,10 +1,12 @@
 const ROLE_MAP = {
     system: 'system',
+    developer: 'developer',
     human: 'user',
     user: 'user',
     assistant: 'assistant',
     bot: 'assistant',
     model: 'assistant',
+    tool: 'tool',
 };
 
 function normalizeRole(rawRole) {

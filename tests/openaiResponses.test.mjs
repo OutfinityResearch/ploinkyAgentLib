@@ -204,6 +204,50 @@ describe('openaiResponses.callLLMStreaming — instructions / stripSystem', () =
         assert.equal(captured.input[0].role, 'developer');
         assert.equal(captured.input[1].role, 'user');
     });
+
+    it('converts assistant function calls and tool results into Responses input items', async () => {
+        let captured;
+        stubFetch((_url, init) => {
+            captured = JSON.parse(init.body);
+            return buildStreamResponse({ events: [{ event: 'response.completed', data: {} }] });
+        });
+
+        await drain(callLLMStreaming(
+            [
+                { role: 'user', content: 'Read a file.' },
+                {
+                    role: 'assistant',
+                    content: null,
+                    tool_calls: [{
+                        id: 'call_1',
+                        type: 'function',
+                        function: { name: 'read_file', arguments: '{"path":"a.txt"}' },
+                    }],
+                },
+                { role: 'tool', tool_call_id: 'call_1', content: 'file contents' },
+            ],
+            {
+                model: 'gpt-5.4',
+                apiKey: 'k',
+                baseURL: 'https://api.openai.com/v1',
+            },
+        ));
+
+        assert.deepEqual(captured.input, [
+            { role: 'user', content: 'Read a file.' },
+            {
+                type: 'function_call',
+                call_id: 'call_1',
+                name: 'read_file',
+                arguments: '{"path":"a.txt"}',
+            },
+            {
+                type: 'function_call_output',
+                call_id: 'call_1',
+                output: 'file contents',
+            },
+        ]);
+    });
 });
 
 describe('openaiResponses.callLLMStreaming — error surfacing', () => {
@@ -425,6 +469,146 @@ describe('openaiResponses.callLLMStreaming — chunk yield contract', () => {
             { type: 'text_delta', text: ' response' },
         ]);
         assert.equal(chunks.find((chunk) => chunk.type === 'done').fullText, 'Partial response');
+    });
+
+    it('streams function-call identity and argument deltas without duplicating finalized arguments', async () => {
+        stubFetch(() => buildStreamResponse({
+            events: [
+                {
+                    event: 'response.output_item.added',
+                    data: {
+                        output_index: 0,
+                        item: {
+                            id: 'fc_1',
+                            type: 'function_call',
+                            call_id: 'call_1',
+                            name: 'exec_command',
+                            arguments: '',
+                        },
+                    },
+                },
+                {
+                    event: 'response.function_call_arguments.delta',
+                    data: { item_id: 'fc_1', output_index: 0, delta: '{"cmd":' },
+                },
+                {
+                    event: 'response.function_call_arguments.delta',
+                    data: { item_id: 'fc_1', output_index: 0, delta: '"pwd"}' },
+                },
+                {
+                    event: 'response.function_call_arguments.done',
+                    data: {
+                        item_id: 'fc_1',
+                        output_index: 0,
+                        name: 'exec_command',
+                        arguments: '{"cmd":"pwd"}',
+                    },
+                },
+                {
+                    event: 'response.output_item.done',
+                    data: {
+                        output_index: 0,
+                        item: {
+                            id: 'fc_1',
+                            type: 'function_call',
+                            call_id: 'call_1',
+                            name: 'exec_command',
+                            arguments: '{"cmd":"pwd"}',
+                        },
+                    },
+                },
+                {
+                    event: 'response.completed',
+                    data: {
+                        response: {
+                            output: [{
+                                id: 'fc_1',
+                                type: 'function_call',
+                                call_id: 'call_1',
+                                name: 'exec_command',
+                                arguments: '{"cmd":"pwd"}',
+                            }],
+                        },
+                    },
+                },
+            ],
+        }));
+
+        const chunks = await drain(callLLMStreaming(
+            [{ role: 'user', content: 'Run pwd.' }],
+            { model: 'gpt-5.4', apiKey: 'k', baseURL: 'https://api.openai.com/v1' },
+        ));
+
+        assert.deepEqual(chunks.filter((chunk) => chunk.type === 'tool_calls_delta'), [
+            {
+                type: 'tool_calls_delta',
+                toolCalls: [{
+                    index: 0,
+                    id: 'call_1',
+                    type: 'function',
+                    function: { name: 'exec_command', arguments: '' },
+                }],
+            },
+            {
+                type: 'tool_calls_delta',
+                toolCalls: [{
+                    index: 0,
+                    id: undefined,
+                    type: 'function',
+                    function: { name: undefined, arguments: '{"cmd":' },
+                }],
+            },
+            {
+                type: 'tool_calls_delta',
+                toolCalls: [{
+                    index: 0,
+                    id: undefined,
+                    type: 'function',
+                    function: { name: undefined, arguments: '"pwd"}' },
+                }],
+            },
+        ]);
+        const done = chunks.find((chunk) => chunk.type === 'done');
+        assert.equal(done.stopReason, 'tool_calls');
+        assert.deepEqual(done.toolCalls, [{
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' },
+        }]);
+    });
+
+    it('recovers a completed-only function call when no argument deltas arrived', async () => {
+        stubFetch(() => buildStreamResponse({
+            events: [{
+                event: 'response.completed',
+                data: {
+                    response: {
+                        output: [{ type: 'message', content: [] }, {
+                            id: 'fc_2',
+                            type: 'function_call',
+                            call_id: 'call_2',
+                            name: 'read_file',
+                            arguments: '{"path":"b.txt"}',
+                        }],
+                    },
+                },
+            }],
+        }));
+
+        const chunks = await drain(callLLMStreaming(
+            [{ role: 'user', content: 'Read b.txt.' }],
+            { model: 'gpt-5.4', apiKey: 'k', baseURL: 'https://api.openai.com/v1' },
+        ));
+
+        assert.deepEqual(chunks.filter((chunk) => chunk.type === 'tool_calls_delta'), [{
+            type: 'tool_calls_delta',
+            toolCalls: [{
+                index: 1,
+                id: 'call_2',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{"path":"b.txt"}' },
+            }],
+        }]);
     });
 });
 

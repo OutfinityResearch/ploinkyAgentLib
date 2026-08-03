@@ -25,6 +25,7 @@ import { parseSSEStream } from './sseParser.mjs';
 
 const ROLE_MAP = {
     system: 'developer',
+    developer: 'developer',
     user: 'user',
     assistant: 'assistant',
 };
@@ -44,16 +45,52 @@ function toResponsesInput(chatContext, { stripSystem = false } = {}) {
     const filtered = stripSystem
         ? messages.filter((msg) => msg.role !== 'system' && msg.role !== 'developer')
         : messages;
-    return filtered.map((msg) => ({
-        role: ROLE_MAP[msg.role] || 'user',
-        content: Array.isArray(msg.content)
+    const input = [];
+
+    for (const msg of filtered) {
+        if (msg.role === 'tool') {
+            input.push({
+                type: 'function_call_output',
+                call_id: msg.tool_call_id,
+                output: stringifyToolOutput(msg.content),
+            });
+            continue;
+        }
+
+        const content = Array.isArray(msg.content)
             ? msg.content.map((part) => {
                 if (part.type === 'text') return { type: 'input_text', text: part.text || '' };
                 if (part.type === 'image_url') return { type: 'input_image', image_url: part.image_url?.url || '' };
                 return part;
             })
-            : msg.content,
-    }));
+            : msg.content;
+
+        if (content !== '' && content !== null && content !== undefined) {
+            input.push({
+                role: ROLE_MAP[msg.role] || 'user',
+                content,
+            });
+        }
+
+        if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
+            for (const toolCall of msg.tool_calls) {
+                input.push({
+                    type: 'function_call',
+                    call_id: toolCall.id,
+                    name: toolCall.function?.name || '',
+                    arguments: toolCall.function?.arguments || '',
+                });
+            }
+        }
+    }
+
+    return input;
+}
+
+function stringifyToolOutput(content) {
+    if (typeof content === 'string') return content;
+    if (content === undefined || content === null) return '';
+    return JSON.stringify(content);
 }
 
 function convertTools(tools) {
@@ -121,6 +158,54 @@ function getMissingFinalText(streamedText, finalText) {
         return finalText.slice(streamedText.length);
     }
     return '';
+}
+
+function responseFunctionCalls(output) {
+    if (!Array.isArray(output)) return [];
+    return output
+        .map((item, outputIndex) => ({ item, outputIndex }))
+        .filter(({ item }) => item?.type === 'function_call');
+}
+
+function createToolCallAccumulator(item = {}, outputIndex = 0) {
+    return {
+        index: outputIndex,
+        itemId: item.id || '',
+        id: item.call_id || item.id || '',
+        name: item.name || '',
+        arguments: item.arguments || '',
+        emittedIdentity: false,
+        emittedArgumentsLength: 0,
+    };
+}
+
+function mergeToolCallAccumulator(accumulator, item = {}) {
+    if (item.id) accumulator.itemId = item.id;
+    if (item.call_id) accumulator.id = item.call_id;
+    if (!accumulator.id && item.id) accumulator.id = item.id;
+    if (item.name) accumulator.name = item.name;
+    if (typeof item.arguments === 'string') accumulator.arguments = item.arguments;
+    return accumulator;
+}
+
+function toolCallDelta(accumulator) {
+    const missingArguments = accumulator.arguments.slice(
+        accumulator.emittedArgumentsLength,
+    );
+    const needsIdentity = !accumulator.emittedIdentity;
+    if (!needsIdentity && !missingArguments) return null;
+
+    accumulator.emittedIdentity = true;
+    accumulator.emittedArgumentsLength = accumulator.arguments.length;
+    return {
+        index: accumulator.index,
+        id: needsIdentity ? accumulator.id : undefined,
+        type: 'function',
+        function: {
+            name: needsIdentity ? accumulator.name : undefined,
+            arguments: missingArguments,
+        },
+    };
 }
 
 function deriveProviderLabel(baseURL) {
@@ -461,6 +546,24 @@ export async function* callLLMStreaming(chatContext, options) {
     let fullText = '';
     let usage = null;
     let finalText = '';
+    const toolCallsByIndex = new Map();
+    const toolCallIndexByItemId = new Map();
+
+    const getToolCall = (data, item = data?.item || {}) => {
+        const index = Number.isInteger(data?.output_index)
+            ? data.output_index
+            : toolCallIndexByItemId.get(data?.item_id || item?.id) ?? toolCallsByIndex.size;
+        let accumulator = toolCallsByIndex.get(index);
+        if (!accumulator) {
+            accumulator = createToolCallAccumulator(item, index);
+            toolCallsByIndex.set(index, accumulator);
+        } else {
+            mergeToolCallAccumulator(accumulator, item);
+        }
+        const itemId = data?.item_id || item?.id;
+        if (itemId) toolCallIndexByItemId.set(itemId, index);
+        return accumulator;
+    };
 
     try {
         for await (const frame of parseSSEStream(response.body, { doneSentinel: null })) {
@@ -488,12 +591,45 @@ export async function* callLLMStreaming(chatContext, options) {
                 yield { type: 'text_delta', text: data.delta };
             }
 
+            if (eventType === 'response.output_item.added' && data.item?.type === 'function_call') {
+                const accumulator = getToolCall(data);
+                const delta = toolCallDelta(accumulator);
+                if (delta) yield { type: 'tool_calls_delta', toolCalls: [delta] };
+            }
+
+            if (eventType === 'response.function_call_arguments.delta' && typeof data.delta === 'string') {
+                const accumulator = getToolCall(data);
+                accumulator.arguments += data.delta;
+                const delta = toolCallDelta(accumulator);
+                if (delta) yield { type: 'tool_calls_delta', toolCalls: [delta] };
+            }
+
+            if (eventType === 'response.function_call_arguments.done') {
+                const accumulator = getToolCall(data, {
+                    name: data.name,
+                    arguments: data.arguments,
+                });
+                const delta = toolCallDelta(accumulator);
+                if (delta) yield { type: 'tool_calls_delta', toolCalls: [delta] };
+            }
+
+            if (eventType === 'response.output_item.done' && data.item?.type === 'function_call') {
+                const accumulator = getToolCall(data);
+                const delta = toolCallDelta(accumulator);
+                if (delta) yield { type: 'tool_calls_delta', toolCalls: [delta] };
+            }
+
             const completedText = extractFinalEventText(eventType, data);
             if (completedText) {
                 finalText = completedText;
             }
 
             if (eventType === 'response.completed') {
+                for (const { item, outputIndex } of responseFunctionCalls(data.response?.output)) {
+                    const accumulator = getToolCall({ output_index: outputIndex, item });
+                    const delta = toolCallDelta(accumulator);
+                    if (delta) yield { type: 'tool_calls_delta', toolCalls: [delta] };
+                }
                 break;
             }
         }
@@ -508,5 +644,22 @@ export async function* callLLMStreaming(chatContext, options) {
         yield { type: 'text_delta', text: missingFinalText };
     }
 
-    yield { type: 'done', fullText, usage };
+    const toolCalls = [...toolCallsByIndex.values()]
+        .sort((left, right) => left.index - right.index)
+        .map((toolCall) => ({
+            id: toolCall.id,
+            type: 'function',
+            function: {
+                name: toolCall.name,
+                arguments: toolCall.arguments,
+            },
+        }));
+
+    yield {
+        type: 'done',
+        fullText,
+        toolCalls: toolCalls.length > 0 ? toolCalls : null,
+        usage,
+        stopReason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
+    };
 }

@@ -105,6 +105,34 @@ test('role-aware conversation history is preserved by every message adapter', ()
     );
 });
 
+test('OpenAI chat messages preserve developer and tool-call history', () => {
+    assert.deepEqual(toOpenAIChatMessages([
+        { role: 'developer', content: 'Use tools when required.' },
+        {
+            role: 'assistant',
+            content: null,
+            tool_calls: [{
+                id: 'call_1',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{"path":"a.txt"}' },
+            }],
+        },
+        { role: 'tool', tool_call_id: 'call_1', content: 'file contents' },
+    ]), [
+        { role: 'developer', content: 'Use tools when required.' },
+        {
+            role: 'assistant',
+            content: '',
+            tool_calls: [{
+                id: 'call_1',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{"path":"a.txt"}' },
+            }],
+        },
+        { role: 'tool', content: 'file contents', tool_call_id: 'call_1' },
+    ]);
+});
+
 test('LLMAgent.complete uses correct message adapter for each configured model (mocked)', async () => {
     const llmAgent = new LLMAgent();
 
