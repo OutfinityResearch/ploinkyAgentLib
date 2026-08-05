@@ -83,6 +83,15 @@ const ORDINARY_AGENT_IDENTITY_NAMES = new Set([
 const GENERATED_LOCAL_SIGNAL_NAMES = Object.freeze(
     GENERATED_LOCAL_RUNTIME_NAMES.filter((name) => !ORDINARY_AGENT_IDENTITY_NAMES.has(name))
 );
+const BWRAP_CREDENTIAL_FILE = '/run/ploinky-agent/credential.json';
+const BWRAP_CREDENTIAL_FILE_NAME = 'PLOINKY_AGENT_CREDENTIAL_FILE';
+const BWRAP_CREDENTIAL_FILE_SOURCE = `PLOINKY_ENV_SOURCE_${BWRAP_CREDENTIAL_FILE_NAME}`;
+const BWRAP_DESCRIPTOR_NEUTRAL_NAMES = new Set([
+    ...ORDINARY_AGENT_IDENTITY_NAMES,
+    ...[...ORDINARY_AGENT_IDENTITY_NAMES].map((name) => `PLOINKY_ENV_SOURCE_${name}`),
+    BWRAP_CREDENTIAL_FILE_NAME,
+    BWRAP_CREDENTIAL_FILE_SOURCE,
+]);
 const verifiedDescriptors = new WeakSet();
 
 /**
@@ -253,7 +262,41 @@ export function isGeneratedLocalRuntimeName(name) {
         || normalized.startsWith('PLOINKY_ENV_SOURCE_PLOINKY_');
 }
 
+function isExactBwrapCredentialTransport(env) {
+    if (env?.PLOINKY_RUNTIME !== 'bwrap'
+        || env[BWRAP_CREDENTIAL_FILE_NAME] !== BWRAP_CREDENTIAL_FILE
+        || env[BWRAP_CREDENTIAL_FILE_SOURCE] !== 'generated') {
+        return false;
+    }
+    const agentId = env.PLOINKY_AGENT_ID;
+    if (typeof agentId !== 'string' || !agentId || agentId !== agentId.trim()
+        || env.PLOINKY_AGENT_PRINCIPAL !== agentId) {
+        return false;
+    }
+    for (const name of ORDINARY_AGENT_IDENTITY_NAMES) {
+        if (typeof env[name] !== 'string' || !env[name] || env[name] !== env[name].trim()
+            || env[`PLOINKY_ENV_SOURCE_${name}`] !== 'generated') {
+            return false;
+        }
+    }
+    for (const name of Object.keys(env)) {
+        const generatedLocalSignal = GENERATED_LOCAL_BUNDLE_NAMES.has(name)
+            || name.startsWith('PLOINKY_ENV_SOURCE_PLOINKY_');
+        if (generatedLocalSignal && !BWRAP_DESCRIPTOR_NEUTRAL_NAMES.has(name)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 export function hasGeneratedLocalDescriptorBundle(env = process.env) {
+    // Bubblewrap transports its verified AgentCredentialContext through a
+    // dedicated read-only pipe file, not through the legacy generated-local
+    // Router descriptor/environment bundle. Only the exact runtime-owned
+    // identity + credential-file marker set is descriptor-neutral. Any Router,
+    // API-key, trust-anchor, or unknown generated marker still selects the
+    // legacy verifier and fails closed as a partial/mixed bundle.
+    if (isExactBwrapCredentialTransport(env)) return false;
     // Agent identity and generation are shared by every Ploinky runtime. They
     // become generated-local evidence only when paired with generated source
     // markers or a descriptor-/Router-/credential-specific signal.

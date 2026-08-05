@@ -78,6 +78,12 @@ const CLASSIFIED_REFERENCES = [
     },
     {
         file: 'utils/LLMProviders/transport/generatedLocalRouterDescriptor.mjs',
+        token: 'PLOINKY_ENV_SOURCE_PLOINKY_',
+        line: "|| name.startsWith('PLOINKY_ENV_SOURCE_PLOINKY_');",
+        rationale: 'Classifies exact bwrap credential-source markers without treating them as a partial Router bundle.',
+    },
+    {
+        file: 'utils/LLMProviders/transport/generatedLocalRouterDescriptor.mjs',
         token: 'PLOINKY_ENV_SOURCE_PLOINKY_AGENT_API_KEY',
         line: "if (String(env.PLOINKY_ENV_SOURCE_PLOINKY_AGENT_API_KEY ?? '') !== 'generated') {",
         rationale: 'Validates the credential provenance marker without reading the credential value.',

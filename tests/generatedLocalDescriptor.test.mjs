@@ -47,6 +47,39 @@ test('ordinary Ploinky identity alone does not claim generated-local authority',
     }
 });
 
+test('the exact bwrap credential transport is not a partial generated-local Router bundle', () => {
+    const env = {
+        PLOINKY_RUNTIME: 'bwrap',
+        PLOINKY_AGENT_CREDENTIAL_FILE: '/run/ploinky-agent/credential.json',
+        PLOINKY_ENV_SOURCE_PLOINKY_AGENT_CREDENTIAL_FILE: 'generated',
+        PLOINKY_AGENT_ID: 'agent:repo/name',
+        PLOINKY_AGENT_PRINCIPAL: 'agent:repo/name',
+        PLOINKY_AGENT_INSTANCE_ID: '11111111-2222-4333-8444-555555555555',
+        PLOINKY_AGENT_ENABLE_GENERATION: '66666666-7777-4888-8999-aaaaaaaaaaaa',
+        PLOINKY_ENV_SOURCE_PLOINKY_AGENT_ID: 'generated',
+        PLOINKY_ENV_SOURCE_PLOINKY_AGENT_PRINCIPAL: 'generated',
+        PLOINKY_ENV_SOURCE_PLOINKY_AGENT_INSTANCE_ID: 'generated',
+        PLOINKY_ENV_SOURCE_PLOINKY_AGENT_ENABLE_GENERATION: 'generated',
+    };
+
+    assert.equal(descriptor.hasGeneratedLocalDescriptorBundle(env), false);
+    assert.equal(descriptor.loadGeneratedLocalRouterDescriptor({ env }), null);
+
+    for (const legacySignal of [
+        { PLOINKY_ROUTER_DESCRIPTOR_FILE: '/run/ploinky/router-descriptor.json' },
+        { PLOINKY_ROUTER_HOST: '127.0.0.1' },
+        { PLOINKY_AGENT_API_PUBLIC_KEY: 'legacy-public-key' },
+        { PLOINKY_AGENT_API_KEY: 'must-not-be-read' },
+        { PLOINKY_ENV_SOURCE_PLOINKY_ROUTER_HOST: 'generated' },
+        { PLOINKY_ENV_SOURCE_PLOINKY_UNRECOGNIZED: 'generated' },
+    ]) {
+        assert.equal(
+            descriptor.hasGeneratedLocalDescriptorBundle({ ...env, ...legacySignal }),
+            true,
+        );
+    }
+});
+
 function temporaryDirectory(t) {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlib-router-descriptor-'));
     t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -358,6 +391,9 @@ test('refresh fails closed when the signed artifact changes', (t) => {
 test('fixture location is the shared producer-consumer source of truth', () => {
     assert.equal(
         GENERATED_LOCAL_FIXTURE_DIR,
-        '/Users/danielsava/work/file-parser/ploinky/tests/fixtures/router-descriptor'
+        path.resolve(
+            path.dirname(fileURLToPath(import.meta.url)),
+            '../../../tests/fixtures/router-descriptor'
+        )
     );
 });
