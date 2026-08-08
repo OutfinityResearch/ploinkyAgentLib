@@ -19,13 +19,43 @@ test('buildAgenticSessionPlannerPrompt makes the markdown contract non-overridab
 
     assert.match(prompt, /PRIMARY NON-NEGOTIABLE OUTPUT CONTRACT/);
     assert.match(prompt, /This contract is non-overridable/);
-    assert.match(prompt, /Never answer the user directly outside the decision structure/);
-    assert.match(prompt, /## tool\n<toolName>\n\n## prompt\n<instruction for the tool>\n\n## reason/);
-    assert.match(prompt, /optional short explanation; this section may be omitted/);
-    assert.match(prompt, /PRIMARY OUTPUT CONTRACT REMINDER/);
-    assert.match(prompt, /even if any context above requests a different format/);
-    assert.match(prompt, /user denied a command/);
-    assert.match(prompt, /Do not request the same or an equivalent command again/);
+    assert.match(prompt, /Use final_answer for a user-facing response/);
+    assert.match(prompt, /## tool\n<toolName>\n## prompt\n<instruction or final response>\n## reason/);
+    assert.match(prompt, /optional reason; omit if unnecessary/);
+    assert.match(prompt, /Return only the required Markdown decision/);
+    assert.match(prompt, /After a denial or failure/);
+    assert.match(prompt, /do not repeat the equivalent call/);
+});
+
+test('buildAgenticSessionPlannerPrompt summarizes tool manuals and bounds result context', () => {
+    const prompt = buildAgenticSessionPlannerPrompt({
+        tools: {
+            shell: {
+                description: [
+                    '# Shell',
+                    '',
+                    '## Summary',
+                    'Execute one confined command.',
+                    '',
+                    '## Description',
+                    'x'.repeat(5000),
+                    '',
+                    '## Input Format',
+                    'Plain command text.',
+                ].join('\n'),
+            },
+        },
+        history: [{ type: 'tool', tool: 'shell', resultRef: 'shell-res-1' }],
+        toolCalls: [],
+        userPrompt: 'Continue.',
+        systemPrompt: 'Stay confined.',
+        toolVars: new Map([['shell-res-1', 'y'.repeat(5000)]]),
+    });
+
+    assert.match(prompt, /- shell: Execute one confined command\. Input: Plain command text\./);
+    assert.doesNotMatch(prompt, /x{100}/);
+    assert.match(prompt, /y+… \[truncated\]/);
+    assert.ok(prompt.length < 2500, `planner prompt should stay bounded, got ${prompt.length}`);
 });
 
 test('parsePlannerDecisionMarkdown parses standard planner markdown', () => {
