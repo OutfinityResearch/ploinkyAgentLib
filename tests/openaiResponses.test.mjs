@@ -302,6 +302,83 @@ describe('openaiResponses.callLLMStreaming — error surfacing', () => {
         assert.doesNotMatch(caught.message, /plain text failure/);
         assert.deepEqual(caught.body, { raw: 'plain text failure' });
     });
+
+    it('surfaces response.failed as an error chunk instead of a successful empty response', async () => {
+        const failedEvent = {
+            event: 'response.failed',
+            data: {
+                response: {
+                    status: 'failed',
+                    error: {
+                        code: 'model_error',
+                        message: 'The upstream model rejected the request.',
+                    },
+                },
+            },
+        };
+        stubFetch(() => buildStreamResponse({ events: [failedEvent] }));
+
+        const chunks = await drain(callLLMStreaming(
+            [{ role: 'user', content: 'hi' }],
+            { model: 'gpt-5.4', apiKey: 'k', baseURL: 'https://chatgpt.com/backend-api/codex' },
+        ));
+
+        assert.equal(chunks.length, 1);
+        assert.equal(chunks[0].type, 'error');
+        assert.equal(chunks[0].error.code, 'OPENAI_RESPONSES_FAILED');
+        assert.equal(
+            chunks[0].error.message,
+            'OpenAI Responses API response failed: The upstream model rejected the request.',
+        );
+        assert.deepEqual(chunks[0].error.body, failedEvent.data);
+    });
+
+    it('surfaces response.incomplete and its reason as an error chunk', async () => {
+        stubFetch(() => buildStreamResponse({
+            events: [{
+                event: 'response.incomplete',
+                data: {
+                    response: {
+                        status: 'incomplete',
+                        incomplete_details: { reason: 'max_output_tokens' },
+                    },
+                },
+            }],
+        }));
+
+        const chunks = await drain(callLLMStreaming(
+            [{ role: 'user', content: 'hi' }],
+            { model: 'gpt-5.4', apiKey: 'k', baseURL: 'https://chatgpt.com/backend-api/codex' },
+        ));
+
+        assert.equal(chunks.length, 1);
+        assert.equal(chunks[0].type, 'error');
+        assert.equal(chunks[0].error.code, 'OPENAI_RESPONSES_INCOMPLETE');
+        assert.equal(
+            chunks[0].error.message,
+            'OpenAI Responses API response incomplete: Reason: max_output_tokens.',
+        );
+    });
+
+    it('surfaces a stream that closes before response.completed as an error chunk', async () => {
+        stubFetch(() => buildStreamResponse({
+            events: [{ event: 'response.output_text.delta', data: { delta: 'Partial' } }],
+        }));
+
+        const chunks = await drain(callLLMStreaming(
+            [{ role: 'user', content: 'hi' }],
+            { model: 'gpt-5.4', apiKey: 'k', baseURL: 'https://chatgpt.com/backend-api/codex' },
+        ));
+
+        assert.deepEqual(chunks.slice(0, 1), [{ type: 'text_delta', text: 'Partial' }]);
+        assert.equal(chunks[1].type, 'error');
+        assert.equal(chunks[1].error.code, 'OPENAI_RESPONSES_STREAM_INCOMPLETE');
+        assert.equal(
+            chunks[1].error.message,
+            'OpenAI Responses API stream ended before response.completed.',
+        );
+        assert.equal(chunks.some((chunk) => chunk.type === 'done'), false);
+    });
 });
 
 describe('openaiResponses.callLLMStreaming — chunk yield contract', () => {

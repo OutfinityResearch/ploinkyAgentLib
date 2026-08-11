@@ -74,11 +74,12 @@ function toResponsesInput(chatContext, { stripSystem = false } = {}) {
 
         if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
             for (const toolCall of msg.tool_calls) {
+                const functionCall = toolCall.function || {};
                 input.push({
                     type: 'function_call',
                     call_id: toolCall.id,
-                    name: toolCall.function?.name || '',
-                    arguments: toolCall.function?.arguments || '',
+                    name: functionCall.name || '',
+                    arguments: functionCall['arguments'] || '',
                 });
             }
         }
@@ -158,6 +159,27 @@ function getMissingFinalText(streamedText, finalText) {
         return finalText.slice(streamedText.length);
     }
     return '';
+}
+
+function createTerminalStreamError(providerLabel, eventType, data) {
+    const response = data?.response;
+    const providerError = response?.error || data?.error;
+    const incompleteDetails = response?.incomplete_details || data?.incomplete_details;
+    let detail = 'Unknown provider error.';
+
+    if (typeof providerError === 'string') {
+        detail = providerError;
+    } else if (typeof providerError?.message === 'string') {
+        detail = providerError.message;
+    } else if (typeof incompleteDetails?.reason === 'string') {
+        detail = `Reason: ${incompleteDetails.reason}.`;
+    }
+
+    const terminalState = eventType.slice('response.'.length);
+    const err = new Error(`${providerLabel} Responses API response ${terminalState}: ${detail}`);
+    err.code = `OPENAI_RESPONSES_${terminalState.toUpperCase()}`;
+    err.body = data;
+    return err;
 }
 
 function responseFunctionCalls(output) {
@@ -546,6 +568,7 @@ export async function* callLLMStreaming(chatContext, options) {
     let fullText = '';
     let usage = null;
     let finalText = '';
+    let completed = false;
     const toolCallsByIndex = new Map();
     const toolCallIndexByItemId = new Map();
 
@@ -578,6 +601,14 @@ export async function* callLLMStreaming(chatContext, options) {
                 yield {
                     type: 'error',
                     error: new Error(`${providerLabel} Responses API returned an error: ${typeof errPayload === 'string' ? errPayload : errPayload.message || 'Unknown provider error.'}`),
+                };
+                return;
+            }
+
+            if (eventType === 'response.failed' || eventType === 'response.incomplete') {
+                yield {
+                    type: 'error',
+                    error: createTerminalStreamError(providerLabel, eventType, data),
                 };
                 return;
             }
@@ -625,6 +656,7 @@ export async function* callLLMStreaming(chatContext, options) {
             }
 
             if (eventType === 'response.completed') {
+                completed = true;
                 for (const { item, outputIndex } of responseFunctionCalls(data.response?.output)) {
                     const accumulator = getToolCall({ output_index: outputIndex, item });
                     const delta = toolCallDelta(accumulator);
@@ -634,6 +666,13 @@ export async function* callLLMStreaming(chatContext, options) {
             }
         }
     } catch (err) {
+        yield { type: 'error', error: err };
+        return;
+    }
+
+    if (!completed) {
+        const err = new Error(`${providerLabel} Responses API stream ended before response.completed.`);
+        err.code = 'OPENAI_RESPONSES_STREAM_INCOMPLETE';
         yield { type: 'error', error: err };
         return;
     }
