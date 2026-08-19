@@ -1,74 +1,65 @@
-# Achilles Agents Reusable Library
+# AchillesAgentLib
 
-Utility library for orchestrating LLM-powered agents, skills, and operator workflows. The package exposes the public API from `AgentLib.mjs` and can be consumed from both ESM (`import`) and CommonJS (`require`) projects.
+AchillesAgentLib is an ESM library that can be integrated into a Node.js application to add portable skill discovery, direct skill execution, reusable LLM-driven conversations, plan-based orchestration, and deterministic local project memory.
+
+## Overview
+
+MainAgent discovers supported skill descriptors below a workspace directory and delegates each enabled skill to its specialized subsystem. General prompts use one reusable LoopAgentSession; orchestration skills may use Loop or SOP sessions. Every model interaction passes through LLMAgent. AgenticKnowledgeUnits is an explicit local-memory API and is never enabled implicitly.
+
+The package distributes eight internal code skills: `bash`, `edit`, `glob`, `grep`, `mirror-code-generator`, `read`, `webfetch`, and `write`. Internal skills are disabled by default.
+
+## Prerequisites
+
+- Node.js with ESM support.
+- Provider credentials and model configuration for workflows that call an LLM.
+- A generated router descriptor only for integration tests that explicitly depend on it.
 
 ## Installation
 
-```bash
+~~~bash
 npm install ploinky-agent-lib
-```
+~~~
 
-For local development against the repository:
+For repository development:
 
-```bash
+~~~bash
 npm install
-npm run build
-```
+~~~
 
-This creates the bundled outputs in `dist/` that get published with the package.
+## Model configuration
 
-## Usage
+LLMAgent uses `LLMConfig.json` by default, and `LLM_MODELS_CONFIG_PATH` may select another file. Supported provider environment variables can supply or override provider and model settings. The integrating application may override semantic tag mappings through the MainAgent `modelConfig` constructor option.
 
-### ESM / TypeScript
+`ACHILLES_DEBUG=true` enables diagnostic logging. `ACHILLES_SKILL_TIMEOUT` controls dynamic-code execution timeout, and `ACHILLES_DBTABLE_TIMEOUT` controls DBTable execution timeout.
 
-```js
-import { Agent, doTask, registerLLMAgent } from 'ploinky-agent-lib';
-```
+## Application integration
 
-### CommonJS
+~~~js
+import { MainAgent } from 'ploinky-agent-lib';
 
-```js
-const { Agent, doTask, registerLLMAgent } = require('ploinky-agent-lib');
-```
+const agent = new MainAgent({
+    startDir: process.cwd(),
+    disableInternalSkills: false,
+    modelConfig: { documentation: 'provider/documentation-model' }
+});
 
-All exports are forwarded from `AgentLib.mjs`, including helpers such as
+const promptResult = await agent.executePrompt('Summarize the public API.');
+const readResult = await agent.executeSkill('read', 'file_path: ./package.json');
+agent.shutdown();
+~~~
 
-- `Agent`
-- `registerLLMAgent`
-- `registerDefaultLLMAgent`
-- `doTask`, `doTaskWithReview`, `doTaskWithHumanReview`
-- `brainstorm`
-- `registerOperator`, `chooseOperator`, `callOperator`
-- `cancelTasks`, `listAgents`
+The application keeps the MainAgent instance for as long as it needs the conversation. `executePrompt()` creates one LoopAgentSession on the first call and reuses it for later prompts. `executeSkill()` resolves one enabled skill and delegates directly to its subsystem.
 
-## Model & Provider Configuration
+AgenticKnowledgeUnits can be imported from the package root when the application needs explicit durable project memory.
 
-The library expects an LLM configuration file named `LLMConfig.json` at the package root. You can override the path via the `LLM_MODELS_CONFIG_PATH` environment variable. Providers may require API keys; check the following environment variables:
+## Verification
 
-- `OPENAI_API_KEY`
-- `GEMINI_API_KEY`
-- `ANTHROPIC_API_KEY`
-- `MISTRAL_API_KEY`
-- `OPENROUTER_API_KEY`
-- `DEEPSEEK_API_KEY`
-- `HUGGINGFACE_API_KEY`
+Run a deterministic component test with `node --test tests/mainAgent/executePrompt.test.mjs`. Run `npm test` after configuring provider credentials and any generated-router descriptor required by integration tests.
 
-Set `LLMAgentClient_DEBUG=true` to log configuration warnings during startup.
+## Documentation
 
-## Development Scripts
-
-- `npm run build` – builds both ESM and CJS bundles with esbuild.
-- `npm run build:esm` / `npm run build:cjs` – run individual bundle targets.
-
-Before publishing, run the full build to ensure `dist/` contains the latest artifacts.
+Technical documentation starts at [`docs/index.html`](docs/index.html). MainAgent request flow is documented in [`docs/main-agent.html`](docs/main-agent.html), terminology is canonical in [`docs/wiki.html`](docs/wiki.html), and authoritative design contracts are available through [`docs/specsLoader.html?spec=matrix.md`](docs/specsLoader.html?spec=matrix.md).
 
 ## License
-(C) Axiologic Research. This code was created as part of Achilles Research Project https://www.achilles-project.eu/ 
-Licsend under MIT license
-Copyright 2025 (C) Axiologic Research.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+Licensed under the MIT License. Copyright 2025 Axiologic Research; the work was created as part of the Achilles Research Project.

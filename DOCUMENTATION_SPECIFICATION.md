@@ -81,6 +81,8 @@ Sidebar navigation should be added only for a real family of related pages.
 - The sidebar must not make the reading column too narrow.
 - On smaller screens, the sidebar must collapse above the content in a clean responsive format.
 
+The header is the single primary navigation system. Every top-level header control must be a button with a non-empty subject-based submenu. The Skill Families submenu contains only the five family overview pages: Orchestration, Code, Dynamic Code, DBTable, and Ploinky. Authoring, runtime, and testing subpages are reached from their family overview page through that family's secondary navigation. The Utilities submenu links only to the main MarkdownDataStore page; its Authoring and Runtime chapters are reached through MarkdownDataStore's secondary navigation. The shared script must close open menus after an outside click and on Escape. A sidebar may remain only as secondary navigation within a real multi-page family.
+
 ## 8. Examples and Callouts
 
 - Use examples where abstract explanation is insufficient.
@@ -101,8 +103,17 @@ Sidebar navigation should be added only for a real family of related pages.
 - If SVG is used, long labels must be shortened, wrapped, or fitted so that no text escapes its visual container.
 - When a page needs to show a representative directory layout, prefer a visual tree component over an ASCII directory dump inside `<pre><code>`.
 - Tree layouts should preserve the real file and folder names, but they should be easier to scan than raw terminal output.
+- The main page and article panel must use the full available width without a fixed centered maximum width. Use compact padding of one rem on desktop and reduce it on narrow screens.
+- Each runtime or architecture diagram must use a centered vertical layout by default, remain visually unframed, and place one centered italic title caption below the diagram.
 
-## 10. Working Procedure
+## 10. Canonical Terminology and Specifications
+
+- `docs/wiki.html` is the only canonical terminology page. Ordinary pages must not contain local Definitions sections.
+- Project-specific terms must have detailed entries with stable `definition-...` anchors, and eligible body-text occurrences must link to those anchors.
+- Design specifications must be opened through `docs/specsLoader.html?spec=matrix.md`. The matrix must contain exactly `Name` and `Description` columns.
+- Ordinary DS files must contain exactly `title` and `summary` frontmatter and use `Introduction` and `Core Content` as their only top-level content sections. Do not add a `Conclusion` section.
+
+## 11. Working Procedure
 
 For each page:
 
@@ -114,7 +125,7 @@ For each page:
 6. Remove unsupported, promotional, redundant, or meta-documentation text.
 7. Review desktop and mobile readability after structural changes.
 
-## 11. Model for the Current Standard
+## 12. Model for the Current Standard
 
 The current reference model for this documentation style is the DBTable documentation family:
 

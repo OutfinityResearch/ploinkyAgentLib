@@ -1,83 +1,30 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Loop Sessions · Achilles Agents Docs</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <div id="site-header"
-        data-breadcrumb='[
-            {"label":"Home","href":"index.html"},
-            {"label":"Agentic Sessions","href":"agentic-sessions.html"},
-            {"label":"Loop Sessions"}
-        ]'></div>
-
-    <main class="content content--with-sidebar">
-        <div class="doc-layout">
-            <aside class="doc-sidebar" aria-label="Agentic session chapter navigation">
-                <p class="doc-sidebar__title">Session Chapters</p>
-                <nav>
-                    <a href="agentic-sessions.html">Overview</a>
-                    <a href="agentic-sessions-loop.html" aria-current="page">Loop Sessions</a>
-                    <a href="agentic-sessions-sop.html">SOP Sessions</a>
-                </nav>
-            </aside>
-
-            <div class="doc-main">
-                <section class="lead">
-                    <h1>Loop Sessions</h1>
-                    <p>The loop-based regime implements a bounded reasoning-and-action pattern in which the model repeatedly selects the next admissible tool, observes the result, and continues until the task reaches a completion signal, an interactive pause, or a configured failure boundary.</p>
-                </section>
-
-                <section>
-                    <h2>Deliberative Step Contract</h2>
-                    <p><code>LoopAgentSession</code> is defined in <code>LLMAgents/LoopAgenticSession/LoopAgentSession.mjs</code>. It is initialized over a tools object whose entries expose both a description and a handler. During construction, the runtime rejects any attempt to use the reserved names <code>final_answer</code> or <code>cannot_complete</code> as ordinary tool names and then injects those completion tools into the active tool surface automatically. The session also normalizes its execution options, including bounded defaults for maximum steps per turn, maximum error count, and retry count for expected-value validation.</p>
-                    <p>The constructor may receive <code>initialHistory</code> as ordered, non-empty <code>{ role, message }</code> records for the <code>user</code> and <code>assistant</code> roles. It validates and translates those records into the existing internal user and final-answer entries before the first prompt runs; it does not introduce a parallel persisted history schema. When <code>newPrompt()</code> is called, an explicitly supplied <code>model</code>, <code>tags</code>, or <code>reasoningEffort</code> value first replaces the corresponding active session option. The update does not recreate the session, so its conversation history remains intact. The session may then run an optional preparation stage. That preparation stage is itself executed through a bounded loop session and may inject derived context into both the system prompt and the working user prompt before the main turn starts. The core turn is then created with explicit state for prompt text, final answer, retry count, used tools, and step history. The session appends the incoming prompt to its history and enters the running state.</p>
-                    <p>From there, the runtime repeatedly builds planner system instructions through <code>buildAgenticSessionPlannerSystemPrompt()</code> and asks the model for the next decision. Earlier user and assistant turns are derived from the existing session history as role-aware messages, while the current request is sent separately as the final user message. The canonical response is Markdown with <code>tool</code> and <code>prompt</code> sections plus an optional <code>reason</code> section. This remains the primary, non-negotiable, and non-overridable format requested before and after the contextual prompt material, so system-prompt content, tool descriptions, execution context, prior conversation, and the current user request remain planning data rather than alternative formatting instructions.</p>
-                    <p>The runtime parser tolerates common provider variations without guessing external actions. Markdown section names and JSON property names are case-insensitive; separator and camel-case variants such as <code>tool-name</code>, <code>tool_name</code>, <code>toolName</code>, and <code>tool name</code> are equivalent, and the same normalization applies to <code>prompt</code>. Headings, inline labels, bold labels, reordered Markdown fields, JSON objects, and one outer Markdown, text, or JSON fence are accepted. <code>reason</code> may be absent. A declared tool without a prompt receives an empty string. A prompt-only response becomes <code>final_answer</code>, as does a reason-only response, whose reason becomes the final prompt. An explicit final-answer label or non-empty non-JSON prose without recognized planner fields also completes the turn. JSON arrays, primitives, malformed explicitly fenced JSON, JSON objects without recognized planner properties, empty responses, and non-string provider values remain invalid. These recovery rules can complete a turn safely, but only an explicit tool field can initiate a non-terminal tool call.</p>
-                </section>
-
-                <section>
-                    <h2>Intermediate Results and Interactive Continuation</h2>
-                    <p>The loop regime is more structured than a naive chat loop because every tool result is stored under a generated symbolic reference. Later prompts may reuse those earlier results through <code>$$variable</code> syntax, which is resolved immediately before the tool handler is called. This allows the planner to depend on explicit prior outputs without inlining large results back into the prompt. The session tracks state across three structures: <code>history</code> (chronological log with result references), <code>toolCalls</code> (metadata-only invocation list for quick lookup), and <code>toolVars</code> (the single source of truth for actual result values). The history records keep this existing domain schema; provider-facing <code>{ role, message }</code> records are temporary values derived only for the LLM invocation.</p>
-                    <p>Tool execution itself is mediated. The supervisor is consulted before a tool handler runs. Approval lets the session temporarily set <code>agent.currentSession</code> and invoke the handler; the handler's ordinary result is then stored without adding approval metadata. Denial skips the handler entirely and stores a human-readable result containing the exact tool name, parameters, and supervisor reason under a normal result reference. The planner continues with that result and may select a safe alternative or explain the refusal, but it must not retry the same denied command in the current turn. Supervisor control fields and raw JSON never become conversation text.</p>
-                    <p>Interactive continuation is handled explicitly. If a tool result is a structured payload containing <code>requiresConfirmation</code> or <code>requiresInput</code>, the session moves into <code>awaiting_input</code> state, records the pending tool in history, and returns the interaction message. On the next prompt, the session first checks whether the new user message should continue that pending interaction. To do so, it uses <code>interpretMessage()</code> with the bounded intents <code>accept</code>, <code>cancel</code>, and <code>update</code>, together with a fresh-instruction heuristic. If the new message still belongs to the pending interaction, the session routes it back to the same tool rather than opening a new planner turn.</p>
-                    <div class="doc-callout doc-callout--note">
-                        <span class="doc-callout__label">Note</span>
-                        <p>This pending-input behavior is what makes loop sessions usable as multi-turn governed workflows. In loop-based orchestration, the surrounding subsystem may store the paused session in <code>sessionMemory</code> and resume it on the next user prompt.</p>
-                    </div>
-                </section>
-
-                <section>
-                    <h2>Execution Bounds and Return Surface</h2>
-                    <p>The loop regime includes several independent stopping and recovery mechanisms. If a tool returns one of the reserved completion wrappers, the session converts that wrapper into the effective final answer. If the caller supplied an <code>expected</code> value for the turn, the session compares the returned completion against that expectation and may retry within a bounded number of attempts. If a tool repeats the same effective invocation and result several times in a row, the session stops rather than allowing trivial loops to continue. If tool errors or planner errors exceed the configured error budget, the session fails explicitly. If the step budget is exhausted, it returns a bounded failure response instead of continuing indefinitely.</p>
-                    <p>Planner failures preserve the same exception path but identify only the remaining invalid response shape, such as an empty response, unsupported JSON, or invalid Markdown. Ordinary non-empty text and JSON objects with recognized planner properties no longer fail parsing because they become normalized decisions. The diagnostic does not compare invalid content with the user request. Tool errors identify unavailable tool names and unknown <code>$$resultRef</code> references, while bounded failures state whether the tool-error budget or planning-step budget was reached.</p>
-                    <p>Loop sessions can also compress long history automatically before each new turn. When estimated token volume crosses a configurable threshold, the runtime sends history entries and resolved result values to the LLM, which returns markdown with <code>summary</code> and <code>keepResultRefs</code> sections. Planner decisions, pending-input classification, preparation, and compression use the active session model; <code>historyCompressionModel</code> can deliberately override it for compression alone. The session replaces old history with one <code>history_summary</code> record, preserves the most recent entries verbatim (default: last 8), and prunes <code>toolVars</code> and <code>toolCalls</code> entries not referenced by the keep list or by recent history. Compression is skipped if a tool is pending in <code>awaiting_input</code> so interactive confirmation flows remain stable.</p>
-                    <p>The return surface is intentionally compact. <code>getLastResult()</code> returns the current last answer. <code>getVariables()</code> returns a small state object containing <code>lastAnswer</code>, the current <code>status</code>, and the number of failed turns. The session also exposes <code>finalizeFailures()</code>, which attempts to convert accumulated failed turns into a <code>cannot_complete</code> result through the reserved completion tool. The regime is therefore adaptive, but its externally visible surface remains narrow.</p>
-                    <p>Cancellation is part of this contract. The loop session links each prompt execution to an internal abort controller and propagates the active signal to planner and interpretation calls. When cancellation is requested, the session moves to <code>interrupted</code>, appends a system interruption entry in history, and returns an interruption answer. The next user prompt clears the interrupted state and resumes normal execution. Tool-level cancellation is cooperative: LLM-facing operations are abortable immediately, while non-interruptible skill handlers may complete before the session stops at the next safe boundary.</p>
-                    <pre><code>const session = await llmAgent.startLoopAgentSession(tools, 'Investigate the request', {
-    model: 'plan',
-    initialHistory: [
-        { role: 'user', message: 'Earlier request' },
-        { role: 'assistant', message: 'Earlier answer' },
-    ],
-    maxStepsPerTurn: 8,
-    maxRetriesPerTurn: 3,
-    historyCompressionThresholdTokens: 6000,
-    historyCompressionKeepRecentEntries: 8,
-});
-
-const answer = session.getLastResult();
-await session.newPrompt('Continue with deeper analysis', { model: 'deep' });
-const state = await session.getVariables();</code></pre>
-                </section>
-            </div>
-        </div>
-    </main>
-
-    <div id="site-footer"></div>
-    <script src="partials-loader.js"></script>
-</body>
-</html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AchillesAgentLib Documentation</title><link rel="stylesheet" href="styles.css"><script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script></head>
+<body><div id="site-header" data-breadcrumb='[{"label":"Home","href":"index.html"},{"label":"Agentic Sessions","href":"agentic-sessions.html"},{"label":"Loop Sessions"}]'></div><main class="content">
+<section class="lead"><h1>Loop Sessions</h1><p>A <a href="wiki.html#definition-loop-session">LoopAgentSession</a> handles an adaptive request when the next tool depends on the latest model decision and tool result.</p></section>
+<section><h2>Execution loop</h2><div class="session-flow-layout session-flow-layout--stacked"><figure class="diagram diagram--session"><pre class="mermaid">flowchart TB
+  P[Receive a new user prompt and compress old history when needed] --> D[Ask LLMAgent for the next tool decision]
+  D --> A{Supervisor approval required?}
+  A -->|approved or not required| T[Execute the selected tool and record its result]
+  A -->|denied| E[Record the denied or failed step]
+  T --> F{Final answer, clarification, or limit reached?}
+  E --> F
+  F -->|continue| D
+  F -->|stop| R[Store the final result and session status]
+  classDef session fill:#f5f1ff,stroke:#6657b8,color:#2d246b;
+  classDef decision fill:#fff7e8,stroke:#b7791f,color:#633c00;
+  classDef outcome fill:#eefbf4,stroke:#28875d,color:#174c38;
+  class P,D,T,E session; class A,F decision; class R outcome;</pre><figcaption><em>Loop session decision cycle</em></figcaption></figure><div class="session-flow-explanation"><h3>How the cycle works</h3><ol class="session-flow-steps"><li><strong>Choose the next action</strong><span>The session receives the prompt, compresses older history when necessary, and asks LLMAgent to select the next tool and its input.</span></li><li><strong>Approve and execute</strong><span>When approval is required, the supervisor permits the tool or records the denial as execution context. An approved tool result is added to session history for the next decision.</span></li><li><strong>Continue or stop</strong><span>The cycle ends with an answer, clarification, interruption, or a configured step, error, or retry limit. Reserved tools provide explicit final-answer and cannot-complete outcomes.</span></li></ol></div></div></section>
+<section><h2>Session memory</h2><table><thead><tr><th>Stored value</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>history</code></td><td>Conversation and execution entries used for later planner calls; validated <code>initialHistory</code> can seed a new session.</td></tr>
+<tr><td><code>turns</code></td><td>Per-prompt turn records, including step and interruption outcomes.</td></tr>
+<tr><td><code>toolCalls</code></td><td>Tool invocation records retained across the session.</td></tr>
+<tr><td><code>toolVars</code> and <code>toolVarCounter</code></td><td>Named intermediate tool values and the counter used to allocate them.</td></tr>
+<tr><td><code>failedTurns</code> and <code>errorCount</code></td><td>Failure evidence used to stop unsafe repetition and produce a cannot-complete result.</td></tr>
+<tr><td><code>lastAnswer</code> and <code>status</code></td><td>The externally visible latest answer and lifecycle state.</td></tr>
+<tr><td><code>options</code></td><td>Active model, tags, reasoning effort, step/error/retry limits, and history-compression settings.</td></tr>
+<tr><td><code>tools</code> and <code>_userTools</code></td><td>The active executable surface; <code>replaceTools()</code> refreshes it after workspace skill changes.</td></tr>
+<tr><td><code>systemPrompt</code> and <code>baseSystemPrompt</code></td><td>The stable prompt context, including the current project root.</td></tr>
+<tr><td><code>supervisor</code> and approval cache</td><td>Approval policy and remembered always-approve decisions.</td></tr>
+</tbody></table></section>
+<section><h2>Continuation and interruption</h2><p><code>newPrompt()</code> continues the same object and may update model options for the next turn. <code>getConversationSnapshot()</code> exposes a serializable type, status, last answer, and cloned history to child skill calls. Cancellation marks the session interrupted and propagates through its abort controller; a later prompt can continue according to the runtime recovery rules.</p></section></main><div id="site-footer"></div><script src="partials-loader.js"></script></body></html>

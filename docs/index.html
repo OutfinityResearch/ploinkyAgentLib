@@ -1,83 +1,19 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Achilles Agents Library Documentation</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <div id="site-header"></div>
-
-    <main class="content content--with-sidebar">
-        <div class="doc-layout">
-            <aside class="doc-sidebar doc-sidebar--dense" aria-label="Documentation groups">
-                <div class="doc-sidebar__group">
-                    <p class="doc-sidebar__group-title">Runtime</p>
-                    <nav>
-                        <a href="llm-agent.html">LLMAgent</a>
-                        <a href="agentic-sessions.html">Agentic Sessions</a>
-                        <a href="subsystems-and-skills.html">Subsystems and Skills</a>
-                    </nav>
-                </div>
-
-                <div class="doc-sidebar__group">
-                    <p class="doc-sidebar__group-title">Skill Families</p>
-                    <nav>
-                        <a href="orchestration-skills.html">Orchestration Skills</a>
-                        <a href="dbtable-skills.html">DBTable</a>
-                        <a href="code-skills.html">Code Skills</a>
-                        <a href="dynamic-code-generation-skills.html">Dynamic Code</a>
-                        <a href="ploinky-skills.html">Ploinky Skills</a>
-                    </nav>
-                </div>
-
-                <div class="doc-sidebar__group">
-                    <p class="doc-sidebar__group-title">Supporting Components</p>
-                    <nav>
-                        <a href="backlog-manager.html">Backlog Manager</a>
-                        <a href="evals-suite.html">Evals Suite</a>
-                        <a href="md-datastore.html">MarkdownDataStore</a>
-                        <a href="agentic-knowledge-units-architecture.html">AKU Architecture Plan</a>
-                        <a href="specification-matrix.html">DS Matrix</a>
-                    </nav>
-                </div>
-            </aside>
-
-            <div class="doc-main">
-                <section class="lead">
-                    <h1>Achilles Agents Library</h1>
-                    <p>
-                        AchillesAgentLib is the runtime layer through which the project executes skill-based agents, model-mediated calls, structured sessions, and family-specific subsystem behavior. The documentation is organized so that the shared runtime surfaces can be read first and the more local skill-family contracts can be approached afterwards.
-                    </p>
-                </section>
-
-                <section>
-                    <h2>The Common Runtime Layer</h2>
-                    <p>The most natural starting point is the common execution layer. <a href="llm-agent.html">LLMAgent</a> is the mediation layer for completions, interpretation helpers, output coercion, and session creation. <a href="agentic-sessions.html">Agentic Sessions</a> describes the bounded multi-step execution model used by the runtime, together with the separate chapters for loop-based and SOP-based regimes. <a href="subsystems-and-skills.html">Subsystems and Skills</a> explains why the library does not collapse all descriptor types into one misleading abstraction and how execution is divided across specialized subsystems. These runtime pages also define interruption behavior, including abort-signal propagation and session recovery after user cancellation.</p>
-                    <p>These pages establish the shared contract of the system. MainAgent retains every discovered skill in its catalog with an enabled state; <code>enableSkills()</code> and <code>disableSkills()</code> update batches atomically, while disabled records are excluded from builds, direct execution, and session or orchestrator tool surfaces. Once that contract is clear, the family-specific pages become easier to read because they can be understood as local execution regimes built on top of the same agent runtime rather than as unrelated features.</p>
-                </section>
-
-                <section>
-                    <h2>Skill Families</h2>
-                    <p>The next layer is the family-specific contract. <a href="orchestration-skills.html">Orchestration Skills</a> define bounded coordination over other skills and determine whether execution proceeds through loop sessions or SOP sessions, and may also declare <code>## Allowed Agents</code> to incorporate remote Ploinky agents as session tools. <a href="dbtable-skills.html">DBTable Skills</a> formalize table-oriented workflows whose source specification in <code>tskill.md</code> is transformed into generated runtime code. <a href="code-skills.html">Code Skills</a> ultimately execute modules loaded from <code>src/index.mjs</code> or <code>src/index.js</code>. <a href="dynamic-code-generation-skills.html">Dynamic Code Generation Skills</a> follow a different contract, centered on runtime text-or-code decisions and temporary execution of generated snippets. <a href="ploinky-skills.html">Ploinky Agent Skills</a> provide dynamic agent discovery and invocation through the router for orchestrator-driven coordination.</p>
-                    <p>Each family page explains not only what the descriptor looks like, but what the subsystem actually imports, prepares, generates, or executes at runtime. This is why the skill-family pages are separate from the general runtime pages: the common agent contract stays shared, but the local interpretation rules are materially different.</p>
-                </section>
-
-                <section>
-                    <h2>Supporting Components</h2>
-                    <p>The repository also contains supporting components that sit around the main runtime rather than replacing it. These components are important for operating and assessing the runtime, even though they are not themselves skill subsystems.</p>
-                    <ul>
-                        <li><a href="backlog-manager.html">Backlog Manager</a> is a small file-oriented utility for maintaining <code>.backlog</code> and <code>.history</code> task files.</li>
-                        <li><a href="evals-suite.html">Evals Suite</a> is the evaluation workspace under <code>evalsSuite/</code> for measuring probabilistic runtime behavior, planning quality, intent detection, code generation, and model benchmarks.</li>
-                        <li><a href="agentic-knowledge-units-architecture.html">Agentic Knowledge Units</a> are shipped as a deterministic local memory utility; the governing v1 specification is <a href="ds008-agentic-knowledge-units.html">DS008</a>.</li>
-                    </ul>
-                </section>
-            </div>
-        </div>
-    </main>
-
-    <div id="site-footer"></div>
-    <script src="partials-loader.js"></script>
-</body>
-</html>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AchillesAgentLib Documentation</title><link rel="stylesheet" href="styles.css"><script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script></head><body><div id="site-header" data-breadcrumb='[{"label":"Home"}]'></div><main class="content">
+<section class="lead"><h1>AchillesAgentLib Documentation</h1><p>AchillesAgentLib can be integrated into a Node.js application to add skill discovery, direct skill execution, reusable model-driven conversations, plan-based orchestration, and deterministic local project memory.</p></section>
+<section><h2>System overview</h2><p>An application integrates AchillesAgentLib by creating <a href="wiki.html#definition-main-agent">MainAgent</a> at a workspace root. MainAgent discovers supported <a href="wiki.html#definition-skill">skill</a> descriptors, registers each one with its <a href="wiki.html#definition-subsystem">specialized subsystem</a>, and exposes the enabled top-level tools to a reusable <a href="wiki.html#definition-loop-session">LoopAgentSession</a>. Every model call passes through <a href="wiki.html#definition-llm-agent">LLMAgent</a>. Orchestration skills may select a <a href="wiki.html#definition-sop-session">SOPAgenticSession</a> for a plan-first workflow.</p>
+<figure class="diagram"><pre class="mermaid">flowchart TB
+  I[Application] --> M[MainAgent: catalog, routing, reusable prompt session]
+  M --> S[Agentic sessions: Loop or SOP]
+  M --> X[Skill subsystems and built-in skill folders]
+  S --> L[LLMAgent and provider configuration]
+  S --> X
+  A[Agentic Knowledge Units] --> I
+  classDef application fill:#eef4ff,stroke:#1c4f9c,color:#0f2557;
+  classDef runtime fill:#f5f1ff,stroke:#6657b8,color:#2d246b;
+  classDef storage fill:#eefbf4,stroke:#28875d,color:#174c38;
+  class I application; class M,S,L,X runtime; class A storage;</pre><figcaption><em>AchillesAgentLib runtime architecture</em></figcaption></figure></section>
+<section><h2>Documentation paths</h2><p>Start with <a href="main-agent.html">MainAgent</a> for the end-to-end request path, then use <a href="agentic-sessions.html">Agentic Sessions</a> and <a href="llm-agent.html">LLMAgent</a> for execution details. <a href="subsystems-and-skills.html">Architecture and Subsystems</a> introduces descriptor families. The Built-in Skills menu reaches the eight portable code skills distributed under <code>skills/</code>. Utilities covers <a href="backlog-manager.html">BacklogManager</a>, <a href="md-datastore.html">MarkdownDataStore</a>, and evaluation support.</p><p>The <a href="wiki.html">Wiki</a> is the canonical terminology source. The design specifications are authoritative for behavior and constraints and are available through <a href="specsLoader.html?spec=matrix.md">Specifications</a>.</p></section>
+<section><h2>Source, style, and tests</h2><p>Public exports begin at <code>index.mjs</code>. Runtime classes live with their subsystem or utility, while portable skill examples and executable code remain inside each skill folder. Coding style, source layout, file-size rules, and modular test organization are defined by <a href="specsLoader.html?spec=DS004-coding-style.md">DS004-coding-style</a>. Deterministic component tests live below <code>tests/</code> and run with <code>node --test &lt;test-file&gt;</code>; <code>npm test</code> runs the complete configured suite.</p></section>
+<section><h2>Built-in skill catalog</h2><table><thead><tr><th>Skill</th><th>Result</th></tr></thead><tbody>
+<tr><td><a href="skill-bash.html">bash</a></td><td>Runs a Bash command with an optional timeout.</td></tr><tr><td><a href="skill-edit.html">edit</a></td><td>Replaces exact file text.</td></tr><tr><td><a href="skill-glob.html">glob</a></td><td>Lists matching files by modification time.</td></tr><tr><td><a href="skill-grep.html">grep</a></td><td>Searches file content with regular expressions.</td></tr><tr><td><a href="skill-mirror-code-generator.html">mirror-code-generator</a></td><td>Builds skill source from local specifications.</td></tr><tr><td><a href="skill-read.html">read</a></td><td>Reads numbered text or base64 binary content.</td></tr><tr><td><a href="skill-webfetch.html">webfetch</a></td><td>Fetches a URL and converts HTML to text.</td></tr><tr><td><a href="skill-write.html">write</a></td><td>Creates or overwrites a file.</td></tr>
+</tbody></table></section></main><div id="site-footer"></div><script src="partials-loader.js"></script></body></html>

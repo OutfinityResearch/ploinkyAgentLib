@@ -1,44 +1,21 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agentic Knowledge Units · Achilles Agents Docs</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <div id="site-header"
-        data-breadcrumb='[
-            {"label":"Home","href":"index.html"},
-            {"label":"Agentic Knowledge Units"}
-        ]'></div>
-
-    <main class="content">
-        <section class="lead">
-            <h1>Agentic Knowledge Units</h1>
-            <p>Agentic Knowledge Units provide deterministic local project memory for AchillesAgentLib. The module is exported as an additive utility and is not wired into <code>MainAgent</code> by default.</p>
-        </section>
-
-        <section>
-            <h2>Runtime Boundary</h2>
-            <p>The implementation lives under <code>AgenticKnowledgeUnits/</code>. Callers instantiate the facade directly when they need filesystem-backed Knowledge Units, JSONL aggregate indexes, lexical search, ContextPack construction, or repair checks. The module does not call <code>LLMAgent</code>, search providers, embeddings, vector stores, or external services.</p>
-            <p>The architecture keeps the public surface small while splitting implementation work across private collaborators for storage, locks, atomic writes, indexing, tokenization, ranking, context packing, and doctor recovery.</p>
-        </section>
-
-        <section>
-            <h2>Source Files</h2>
-            <p>The canonical design material remains in the repository source files. <code>docs/specs/DS008-AgenticKnowledgeUnits.md</code> is the governing v1 contract, and this generated documentation page keeps the static HTML navigation available without depending on raw Markdown serving.</p>
-        </section>
-
-        <section>
-            <h2>Public Import</h2>
-            <p>The stable public import is the package subpath:</p>
-            <pre><code>import { AgenticKnowledgeUnits } from 'ploinky-agent-lib/AgenticKnowledgeUnits';</code></pre>
-            <p>The root package barrel also exposes the named <code>AgenticKnowledgeUnits</code> export for callers that already import from the main library surface.</p>
-        </section>
-    </main>
-
-    <div id="site-footer"></div>
-    <script src="partials-loader.js"></script>
-</body>
-</html>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AchillesAgentLib Documentation</title><link rel="stylesheet" href="styles.css"><script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script></head><body><div id="site-header" data-breadcrumb='[{"label":"Home","href":"index.html"},{"label":"Agentic Knowledge Units"}]'></div><main class="content">
+<section class="lead"><h1>Agentic Knowledge Units</h1><p><a href="wiki.html#definition-agentic-knowledge-units">Agentic Knowledge Units (AKU)</a> provide deterministic, local-first project memory. Callers store durable work products as Knowledge Units, then search them or build bounded context packs without an LLM or vector database.</p></section>
+<section><h2>Implemented lifecycle</h2><figure class="diagram"><pre class="mermaid">flowchart TB
+  A[Initialize or load the AKU root] --> K[Create, update, fork, discard, or delete Knowledge Units]
+  K --> R[Record events, documents, files, folders, links, runs, results, validations, and sessions]
+  R --> I[Update aggregate indexes with locked atomic transactions]
+  I --> Q[Search records or resolve a scoped context graph]
+  Q --> C[Build a character-budgeted ContextPack]
+  classDef lifecycle fill:#f5f1ff,stroke:#6657b8,color:#2d246b;
+  classDef storage fill:#eef4ff,stroke:#1c4f9c,color:#0f2557;
+  classDef result fill:#eefbf4,stroke:#28875d,color:#174c38;
+  class A,K lifecycle; class R,I storage; class Q,C result;</pre><figcaption><em>AKU storage and retrieval lifecycle</em></figcaption></figure>
+<p><code>AgenticKnowledgeUnits.mjs</code> implements the public lifecycle and delegates schemas, storage, indexing, lexical ranking, locking, recovery, and context-pack construction to modules under <code>AgenticKnowledgeUnits/internal/</code>. <code>AgenticKnowledgeUnits.d.ts</code> publishes the matching TypeScript surface.</p></section>
+<section><h2>Current public surface</h2><table><thead><tr><th>Area</th><th>Methods</th></tr></thead><tbody>
+<tr><td>Root and KU lifecycle</td><td><code>initAKU</code>, <code>loadAKU</code>, <code>exists</code>, <code>initKU</code>, <code>loadKU</code>, <code>updateKUState</code>, <code>setKUStatus</code>, <code>forkKU</code>, <code>discardKU</code>, <code>deleteKU</code></td></tr>
+<tr><td>Evidence records</td><td><code>recordEvent</code>, <code>recordDocument</code>, <code>registerFile</code>, <code>registerFolderScope</code>, <code>recordResult</code>, <code>recordRun</code>, <code>recordValidation</code></td></tr>
+<tr><td>Relationships and sessions</td><td><code>linkKU</code>, <code>unlinkKU</code>, <code>resolveContextGraph</code>, <code>ingestSession</code>, <code>discardSession</code></td></tr>
+<tr><td>Retrieval</td><td><code>search</code>, <code>buildContextPack</code>, <code>buildScopedContextPack</code>, and list methods for each indexed record family</td></tr>
+<tr><td>Integrity</td><td><code>updateIndexes</code>, <code>rebuildIndexes</code>, and <code>doctor</code></td></tr>
+</tbody></table></section>
+<section><h2>Storage and retrieval guarantees</h2><p>AKU uses local JSON and JSONL records, aggregate indexes, advisory locks, and atomic writes. Mutations are scoped to an AKU root and KU transaction. Search uses deterministic lexical scoring with filters, bounded per-KU diversity, and optional explanations. Context packs enforce a character budget and may include state, history, linked units, explicit units, and folder-scoped candidates according to supplied options.</p><p>Discarded or obsolete material is excluded from normal retrieval unless the caller opts into audit-oriented filters. Physical deletion requires explicit confirmation. <code>doctor()</code> and automatic repair support recoverable index and storage inconsistencies; they do not turn AKU into semantic retrieval or decide what knowledge is valid.</p></section></main><div id="site-footer"></div><script src="partials-loader.js"></script></body></html>

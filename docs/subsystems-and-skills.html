@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Subsystems and Skills · Achilles Agents Docs</title>
+    <title>AchillesAgentLib Documentation</title>
     <link rel="stylesheet" href="styles.css">
+    <script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs'; mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script>
 </head>
 <body>
     <div id="site-header"
@@ -13,20 +14,7 @@
             {"label":"Subsystems and Skills"}
         ]'></div>
 
-    <main class="content content--with-sidebar">
-        <div class="doc-layout">
-            <aside class="doc-sidebar" aria-label="Skill family shortcuts">
-                <p class="doc-sidebar__title">Skill Shortcuts</p>
-                <nav>
-                    <a href="orchestration-skills.html">Orchestration</a>
-                    <a href="dbtable-skills.html">DBTable</a>
-                    <a href="code-skills.html">Code Skills</a>
-                    <a href="dynamic-code-generation-skills.html">Dynamic Code Gen</a>
-                    <a href="ploinky-skills.html">Ploinky</a>
-                </nav>
-            </aside>
-
-            <div class="doc-main">
+    <main class="content">
                 <section class="lead">
                     <h1>Subsystems and Skills</h1>
                     <p>This page explains why AchillesAgentLib classifies skills into multiple families and how those families are connected to distinct execution subsystems. The classification is not an editorial convenience. It is part of the runtime design through which discovery, preparation, and execution are kept consistent across materially different kinds of skills.</p>
@@ -89,8 +77,6 @@
                     </div>
                     <p>This example should be read as a type-oriented sketch rather than as a claim that every family has the same companion files. The actual runtime details belong to the dedicated pages for each subsystem. The function of the present page is to establish the governing principle: skill categories are first-class runtime categories, and subsystems are the mechanism that makes those categories executable without collapsing them into one misleading abstraction.</p>
                 </section>
-            </div>
-        </div>
     </main>
 
     <div id="site-footer"></div>

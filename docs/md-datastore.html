@@ -3,16 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MarkdownDataStore · Achilles Agents Docs</title>
+    <title>AchillesAgentLib Documentation</title>
     <link rel="stylesheet" href="styles.css">
+    <script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script>
 </head>
 <body>
-    <div id="site-header"
-        data-breadcrumb='[
-            {"label":"Home","href":"index.html"},
-            {"label":"MarkdownDataStore"}
-        ]'></div>
-
+    <div id="site-header" data-breadcrumb='[{"label":"Home","href":"index.html"},{"label":"MarkdownDataStore"}]'></div>
     <main class="content content--with-sidebar">
         <div class="doc-layout">
             <aside class="doc-sidebar" aria-label="MarkdownDataStore chapter navigation">
@@ -23,28 +19,39 @@
                     <a href="md-datastore-runtime.html">Runtime</a>
                 </nav>
             </aside>
-
             <div class="doc-main">
-                <section class="lead">
-                    <h1>MarkdownDataStore</h1>
-                    <p>MarkdownDataStore is the shared file-based storage utility for structured markdown files under a configured data directory.</p>
-                </section>
+                <section class="lead"><h1>MarkdownDataStore</h1><p><a href="wiki.html#definition-markdown-data-store">MarkdownDataStore</a> stores named records as Markdown files whose data is divided into numbered level-three sections. It is useful when people must be able to inspect and edit persisted session or profile data without a database client.</p></section>
+                <section><h2>Example record</h2><p>The following calls create <code>data/sessions/session-1.md</code> and append a second history entry:</p><pre><code>const store = new MarkdownDataStore({ dataDir: './data' });
 
-                <section>
-                    <h2>Purpose</h2>
-                    <p>The class centralizes markdown section parsing, rendering, and updates so agent-level code can remain thin and rely on generic APIs. Files are grouped by optional <code>type</code> folders and sections are normalized to the numbered form <code>### N. Section Name</code>.</p>
-                    <p>Empty section content is normalized to <code>*None*</code> at write time, so consumers do not need custom fallback logic.</p>
-                </section>
+await store.updateFile('sessions', 'session-1', {
+    Profile: '- Developer',
+    History: '- **User**: Document the request flow'
+});
 
-                <section>
-                    <h2>Core API Surface</h2>
-                    <p>The canonical file-level methods are <code>listFiles</code>, <code>getFile</code>, <code>updateFile</code>, <code>replaceFile</code>, <code>appendToFile</code>, <code>deleteFile</code>, <code>getSectionMap</code>, and <code>getFileStats</code>.</p>
-                    <p>Selection and mutation can target sections by name or by numeric index, allowing callers to work with stable section numbering when needed.</p>
-                </section>
+await store.appendToFile('sessions', 'session-1', {
+    sections: {
+        History: '- **Agent**: Added the MainAgent diagram'
+    }
+});</code></pre><p>The resulting file remains normal Markdown:</p><pre><code>### 1. Profile
+- Developer
+
+### 2. History
+- **User**: Document the request flow
+- **Agent**: Added the MainAgent diagram</code></pre></section>
+                <section><h2>Main operations</h2><table><thead><tr><th>Operation</th><th>Behavior</th></tr></thead><tbody>
+                    <tr><td><code>listFiles(type)</code></td><td>Lists Markdown record names at the root or within a validated type directory.</td></tr>
+                    <tr><td><code>getFile(type, name, selectors)</code></td><td>Returns all sections and raw Markdown, or selected sections by name or one-based index.</td></tr>
+                    <tr><td><code>getSectionMap()</code></td><td>Returns section content keyed by section name.</td></tr>
+                    <tr><td><code>replaceFile()</code></td><td>Replaces the complete ordered section set.</td></tr>
+                    <tr><td><code>appendToFile()</code></td><td>Appends content to matching sections and can deduplicate normalized lines.</td></tr>
+                    <tr><td><code>updateFile()</code></td><td>Appends to existing sections and creates missing sections.</td></tr>
+                    <tr><td><code>deleteFile()</code></td><td>Deletes selected sections and renumbers the remainder, or deletes the complete file.</td></tr>
+                    <tr><td><code>parseList()</code>, <code>parseDialogue()</code>, <code>parseKeyValue()</code></td><td>Convert supported Markdown shapes to arrays or records; matching render methods produce canonical Markdown.</td></tr>
+                </tbody></table></section>
+                <section><h2>Safety and scope</h2><p>The constructor requires <code>dataDir</code>. Type and file-name normalization prevent traversal outside that directory. Empty section content is normalized to <code>*None*</code>. The store does not interpret the business meaning of a section and does not provide cross-file transactions.</p></section>
             </div>
         </div>
     </main>
-
     <div id="site-footer"></div>
     <script src="partials-loader.js"></script>
 </body>

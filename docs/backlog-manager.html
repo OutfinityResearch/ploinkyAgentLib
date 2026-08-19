@@ -1,56 +1,28 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Backlog Manager · Achilles Agents Docs</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <div id="site-header"
-        data-breadcrumb='[
-            {"label":"Home","href":"index.html"},
-            {"label":"Backlog Manager"}
-        ]'></div>
-
-    <main class="content">
-        <section class="lead">
-            <h1>Backlog Manager</h1>
-            <p>Backlog Manager is a small file-oriented utility layer for reading, updating, and persisting task lists stored as <code>.backlog</code> files together with their associated <code>.history</code> files. In the current repository, it should be understood as a persistence helper for structured task tracking rather than as a skill subsystem or a separate agent runtime.</p>
-        </section>
-
-        <section>
-            <h2>Structured Task Files</h2>
-            <p>The component exists because some coordination problems are easier to manage as explicit task artefacts than as volatile conversational state. A backlog file provides a durable list of pending tasks, while the corresponding history file records tasks that have already been completed. This separation is simple, but it creates a stable external memory surface that other tools or workflows can inspect without relying on the internal memory of an agent session.</p>
-            <p>The storage model is narrower than the previous page suggested. The component does not implement a generic task-management subsystem with arbitrary status models. It works with a concrete task shape containing <code>description</code>, <code>options</code>, and <code>resolution</code>. Pending tasks live in the <code>.backlog</code> file. Completed tasks are moved into the paired <code>.history</code> file. The runtime therefore supports explicit task evolution, but inside a small fixed data model rather than inside a broader workflow engine.</p>
-            <pre><code>project-specs.backlog
-project-specs.history</code></pre>
-        </section>
-
-        <section>
-            <h2>Operational API</h2>
-            <p>The exported API in <code>BacklogManager/BacklogManager.mjs</code> focuses on a narrow set of file-level operations. <code>loadBacklog()</code> returns the current tasks, the stored history, and basic file metadata when available. <code>createBacklog()</code> initializes a new empty backlog-history pair. <code>getTask()</code>, <code>updateTask()</code>, <code>addTask()</code>, and <code>addTasksFromText()</code> operate on the pending task list. <code>approveTask()</code> sets a resolution and clears any remaining options. <code>addOptionsFromText()</code> parses numbered text into candidate options for an existing task. <code>markDone()</code> moves a task from the active backlog into the history file, carrying forward a resolution or using the default text <code>Executed.</code> when no explicit resolution exists.</p>
-            <p>The text parsing path is also deliberately limited. Numbered lines such as <code>1.</code> or <code>1)</code> are treated as separate option entries or separate tasks, and indented or subsequent non-empty lines are appended as detail text to the current item. This means the component supports compact human-authored backlog updates, but it does not attempt to interpret arbitrary prose or infer a broader planning structure.</p>
-            <div class="doc-callout doc-callout--note">
-                <span class="doc-callout__label">Note</span>
-                <p>Task indices are one-based at the public API level. Internally, the manager converts them to zero-based array positions before reading or updating the task list.</p>
-            </div>
-        </section>
-
-        <section>
-            <h2>Persistence Model</h2>
-            <p>The persistence logic lives in <code>BacklogManager/backlogIO.mjs</code>. Files are normalized so that the active file always ends in <code>.backlog</code> and the paired history path always ends in <code>.history</code>. Loaded backlog entries are cached in memory inside a process-local save queue. Subsequent updates modify that cached entry and mark it as dirty rather than writing immediately to disk. A timed save loop then flushes modified entries at a bounded interval, which defaults to five seconds.</p>
-            <p>This design is important for understanding the operational behavior of the module. A call such as <code>saveBacklogFile()</code> updates the in-memory cache and marks the entry as modified, but it does not necessarily write to disk immediately. When an immediate write is needed, <code>forceSave()</code> or the higher-level <code>flush()</code> function performs an explicit flush of the modified entry. The component therefore trades strict write-through persistence for a simpler buffered save model.</p>
-            <p>The same module also normalizes task and history records on load and on save. Missing fields are coerced into the expected shape, non-string options are stringified, and missing files are treated as empty structures. This keeps the persisted shape stable even when the input data is incomplete or loosely typed.</p>
-        </section>
-
-        <section>
-            <h2>Supporting Domain Helper</h2>
-            <p>The file <code>BacklogManager/backlogDomain.mjs</code> currently exposes a single helper, <code>ChangeQueue</code>. It is a minimal in-memory queue for collecting task-reference changes, sorting them deterministically by task reference, draining them, and clearing the queue. In the current implementation it is a small supporting utility rather than a full domain layer.</p>
-        </section>
-    </main>
-
-    <div id="site-footer"></div>
-    <script src="partials-loader.js"></script>
-</body>
-</html>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AchillesAgentLib Documentation</title><link rel="stylesheet" href="styles.css"><script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script></head><body><div id="site-header" data-breadcrumb='[{"label":"Home","href":"index.html"},{"label":"Backlog Manager"}]'></div><main class="content">
+<section class="lead"><h1>Backlog Manager</h1><p><a href="wiki.html#definition-backlog-manager">BacklogManager</a> is a public file-backed task utility. It keeps active tasks in a <code>.backlog</code> JSON file and completed tasks in the matching <code>.history</code> file.</p></section>
+<section><h2>Backlog example</h2><p>For a base path such as <code>planning/specs</code>, the utility reads <code>planning/specs.backlog</code> and <code>planning/specs.history</code>. An active backlog may contain:</p><pre><code>{
+  "tasks": [
+    {
+      "description": "Document MainAgent request routing",
+      "options": [
+        "Add a sequence diagram",
+        "Add a flowchart"
+      ],
+      "resolution": ""
+    },
+    {
+      "description": "Reduce documentation page padding",
+      "options": [],
+      "resolution": "Use one rem on desktop and half a rem on mobile."
+    }
+  ]
+}</code></pre><p>Calling <code>markDone(basePath, 2)</code> removes the second task from the active array and appends it to the history file with its resolution. Task identifiers accepted by the API are one-based.</p></section>
+<section><h2>Operational API</h2><table><thead><tr><th>Operation</th><th>Result</th></tr></thead><tbody>
+<tr><td><code>createBacklog()</code> / <code>loadBacklog()</code></td><td>Create the pair of files or load tasks, history, and backlog file metadata.</td></tr>
+<tr><td><code>addTask()</code> / <code>addTasksFromText()</code></td><td>Append one task or numbered task descriptions.</td></tr>
+<tr><td><code>getTask()</code>, <code>getApprovedTasks()</code>, <code>getNewTasks()</code></td><td>Read one task or selected task sets.</td></tr>
+<tr><td><code>addOptionsFromText()</code> / <code>approveTask()</code></td><td>Add numbered alternatives or store a resolution and clear alternatives.</td></tr>
+<tr><td><code>updateTask()</code></td><td>Change only supported description, options, and resolution fields.</td></tr>
+<tr><td><code>markDone()</code></td><td>Move the selected task into history, using <code>Executed.</code> when no resolution exists.</td></tr>
+<tr><td><code>saveBacklog()</code> / <code>flush()</code></td><td>Persist supplied data or force queued writes to complete.</td></tr>
+</tbody></table></section><section><h2>Persistence boundary</h2><p>The utility serializes task objects and coordinates writes through <code>backlogIO.mjs</code>. It does not schedule work, choose an option, or execute a task; the caller owns those decisions.</p></section></main><div id="site-footer"></div><script src="partials-loader.js"></script></body></html>

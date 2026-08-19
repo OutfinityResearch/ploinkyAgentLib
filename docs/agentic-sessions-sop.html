@@ -1,72 +1,31 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SOP Sessions · Achilles Agents Docs</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <div id="site-header"
-        data-breadcrumb='[
-            {"label":"Home","href":"index.html"},
-            {"label":"Agentic Sessions","href":"agentic-sessions.html"},
-            {"label":"SOP Sessions"}
-        ]'></div>
-
-    <main class="content content--with-sidebar">
-        <div class="doc-layout">
-            <aside class="doc-sidebar" aria-label="Agentic session chapter navigation">
-                <p class="doc-sidebar__title">Session Chapters</p>
-                <nav>
-                    <a href="agentic-sessions.html">Overview</a>
-                    <a href="agentic-sessions-loop.html">Loop Sessions</a>
-                    <a href="agentic-sessions-sop.html" aria-current="page">SOP Sessions</a>
-                </nav>
-            </aside>
-
-            <div class="doc-main">
-                <section class="lead">
-                    <h1>SOP Sessions</h1>
-                    <p>The SOP-based regime implements plan-first execution. Instead of selecting the next action at every step, it first compiles a Plan SOPlang artifact over a bounded skill space and then executes that artifact through a commands registry.</p>
-                </section>
-
-                <section>
-                    <h2>Planning Surface and Session State</h2>
-                    <p><code>SOPAgenticSession</code> is defined in <code>LLMAgents/SOPAgenticSession/SOPAgenticSession.mjs</code>. It is initialized over a <code>skillsDescription</code> object, not over executable tool handlers directly. The constructor adds the reserved completion commands <code>final_answer</code> and <code>cannot_complete</code> to that planning surface automatically, normalizes <code>planOnly</code>, and keeps separate option groups for plan generation and interpreter execution. When a concrete execution registry is provided, the session wraps it so completion commands and interactive command results can be handled under the same bounded contract.</p>
-                    <p>The session keeps explicit state for <code>currentPlan</code>, <code>lastExecution</code>, <code>lastRunFailures</code>, <code>pendingTool</code>, preparation context, and a bounded maximum number of plan attempts. The important architectural point is that the planning surface and the execution surface are related but not identical. <code>skillsDescription</code> is the symbolic space in which the planner composes a script. <code>commandsRegistry</code> is the runtime surface that actually executes the resulting commands.</p>
-                    <p>When <code>newPrompt()</code> begins, explicitly supplied <code>model</code>, <code>tags</code>, and <code>reasoningEffort</code> values become the active session options without discarding history. The session may then run a bounded preparation stage. That preparation stage itself uses a SOP session and may contribute either comment-based or injected preparation context to the main plan. Once preparation is complete, the main planning cycle builds system instructions through <code>buildSOPAgenticPlannerSystemPrompt()</code>, derives earlier prompt/plan pairs as user/assistant messages, and invokes the plan-generation path with the current request kept as the final user message. Preparation, pending-input classification, and planning use the active model unless the caller deliberately configured a dedicated <code>llmModel</code> in the plan-generator or interpreter options. The result is an executable script rather than a free-form textual recommendation.</p>
-                </section>
-
-                <section>
-                    <h2>Execution Registry and Interactive Continuation</h2>
-                    <p>If no executable registry is present, or if <code>planOnly</code> is true, the session stops after plan generation and returns the current plan without executing it. Otherwise the generated script is run through <code>Plan SOPlang Interpreter</code> against the wrapped commands registry. This separation is what makes the regime inspectable: plan generation is explicit, and plan execution is explicit.</p>
-                    <p>The wrapped execution registry intercepts the reserved completion commands directly and normalizes them into the final answer state. It also watches for structured command results that signal <code>requiresInput</code> or <code>requiresConfirmation</code>. When such a result appears, the session records the pending command, appends an <code>awaiting_input</code> entry to history, and stops normal execution flow. If a subsequent user prompt appears to continue that pending interaction, the session does not immediately regenerate a full plan. Instead, it builds a minimal direct plan that calls the pending command and then forwards the returned value into <code>final_answer</code>.</p>
-                    <p>This behavior gives the SOP regime a more governed form of interactivity than a plain static plan. The plan remains the central execution artifact, but the runtime can still suspend and resume around a pending command when user confirmation or corrective input is required.</p>
-                </section>
-
-                <section>
-                    <h2>Bounded Replanning and Return Surface</h2>
-                    <p>After a plan executes, the session inspects the interpreter outcome and records any reported failures. If failures exist, the session may ask the planning layer to repair only the Plan SOPlang code, injecting a structured feedback block that lists failed variables and any available variable snapshot. This repair cycle is bounded by <code>maxPlanAttempts</code>, whose default is limited rather than open-ended. The regime therefore supports recovery, but it does not allow indefinite replanning drift.</p>
-                    <p>Cancellation is also explicit in this regime. Prompt-scoped abort signals are propagated into plan generation and interpreter LLM calls. When cancellation occurs, the session transitions to <code>interrupted</code>, appends a system interruption event to history, and returns an interruption answer. A later prompt exits interrupted state automatically and resumes normal SOP planning. As with loop sessions, immediate cancellation is guaranteed for LLM calls, while skill-side command handlers may stop at the next safe boundary when they cannot be preempted mid-execution.</p>
-                    <p>The final answer may come directly from the reserved completion command or may be derived from the execution variables when no explicit final answer wrapper was captured. The derivation logic first checks for <code>lastAnswer</code>, then for several priority variable names, and finally for the sole variable when exactly one variable exists. This makes the return surface narrower and more stable than the raw interpreter state.</p>
-                    <p><code>getPlan()</code> returns the last generated script. <code>getLastResult()</code> returns the last resolved answer. <code>getVariables()</code> returns a richer state object than the loop regime, including <code>lastPlan</code>, <code>lastAnswer</code>, the current execution variables, and a simple active-or-idle status. Stored SOP history remains a sequence of <code>{ prompt, plan }</code> records; the role-aware conversation is derived only for the provider call, so existing snapshots and consumers keep the same format. The SOP regime is therefore appropriate when the reader or caller benefits from an explicit executable artifact and from more inspectable intermediate structure than a turn-by-turn deliberation loop normally provides.</p>
-                    <pre><code>const session = await llmAgent.startSOPLangAgentSession(skillsDescription, 'Prepare the report', {
-    commandsRegistry,
-    planOnly: false,
-    maxPlanAttempts: 3,
-});
-
-const plan = await session.getPlan();
-const answer = session.getLastResult();
-await session.newPrompt('Regenerate with deeper analysis', { model: 'deep' });
-const state = await session.getVariables();</code></pre>
-                </section>
-            </div>
-        </div>
-    </main>
-
-    <div id="site-footer"></div>
-    <script src="partials-loader.js"></script>
-</body>
-</html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AchillesAgentLib Documentation</title><link rel="stylesheet" href="styles.css"><script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script></head>
+<body><div id="site-header" data-breadcrumb='[{"label":"Home","href":"index.html"},{"label":"Agentic Sessions","href":"agentic-sessions.html"},{"label":"SOP Sessions"}]'></div><main class="content">
+<section class="lead"><h1>SOP Sessions</h1><p>A <a href="wiki.html#definition-sop-session">SOPAgenticSession</a> converts a request into a LightSOPLang plan, validates the commands, executes the dependency graph, and can replan when execution reports failures.</p></section>
+<section><h2>Plan and execution loop</h2><div class="session-flow-layout session-flow-layout--stacked"><figure class="diagram diagram--session"><pre class="mermaid">flowchart TB
+  P[Receive prompt and prepare optional context] --> G[LLMAgent generates a LightSOPLang plan]
+  G --> V{Commands and topology valid?}
+  V -->|no| G
+  V -->|yes| X[Execute ready commands through the wrapped registry]
+  X --> C{Awaiting input or failures?}
+  C -->|awaiting input| W[Keep pending tool and return control to the caller]
+  C -->|failures within attempt limit| G
+  C -->|complete| R[Store plan, variables, answer, and active status]
+  classDef session fill:#f5f1ff,stroke:#6657b8,color:#2d246b;
+  classDef decision fill:#fff7e8,stroke:#b7791f,color:#633c00;
+  classDef outcome fill:#eefbf4,stroke:#28875d,color:#174c38;
+  class P,G,X session; class V,C decision; class W,R outcome;</pre><figcaption><em>SOP session planning cycle</em></figcaption></figure><div class="session-flow-explanation"><h3>How the cycle works</h3><ol class="session-flow-steps"><li><strong>Generate and validate the plan</strong><span>The session prepares optional context and asks LLMAgent for a LightSOPLang plan. Every command and dependency is validated before execution, and an invalid plan returns to generation within the configured attempt limit.</span></li><li><strong>Execute ready commands</strong><span>Commands run when their dependencies are satisfied. A command that needs user input is stored as <code>pendingTool</code>, while recoverable failures return to bounded replanning.</span></li><li><strong>Store the outcome</strong><span>Successful execution stores the plan, variables, answer, and session status. Reserved commands provide explicit final outcomes, while <code>planOnly</code> or <code>generatePlanOnly</code> stops after plan generation.</span></li></ol></div></div></section>
+<section><h2>Session memory</h2><table><thead><tr><th>Stored value</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>history</code></td><td>Prompt, planning, execution, and interruption entries used for continuation and diagnostics.</td></tr>
+<tr><td><code>currentPlan</code></td><td>The latest generated LightSOPLang source.</td></tr>
+<tr><td><code>lastExecution</code></td><td>The latest execution result, including variables and the derived final answer.</td></tr>
+<tr><td><code>_lastFinalAnswer</code></td><td>The explicit final answer emitted by the reserved command.</td></tr>
+<tr><td><code>lastRunFailures</code></td><td>Failures fed back into bounded replanning.</td></tr>
+<tr><td><code>pendingTool</code></td><td>A command paused for user input and resumed by a later prompt.</td></tr>
+<tr><td><code>skillsDescription</code></td><td>The model-visible command descriptions, including reserved runtime commands.</td></tr>
+<tr><td><code>commandsRegistry</code> and <code>planCommandsRegistry</code></td><td>The wrapped execution commands and the commands available while constructing the plan.</td></tr>
+<tr><td><code>preparationContextText</code> and <code>preparationContextLines</code></td><td>Context collected before planning when preparation is configured.</td></tr>
+<tr><td><code>options</code>, <code>maxPlanAttempts</code>, and <code>status</code></td><td>Model routing, plan-only behavior, retry bound, and lifecycle state.</td></tr>
+<tr><td><code>systemPrompt</code> and <code>baseSystemPrompt</code></td><td>Stable instructions used by plan generation and execution interpretation.</td></tr>
+</tbody></table></section>
+<section><h2>Continuation boundary</h2><p><code>newPrompt()</code> can resume a pending tool, treat the message as a fresh instruction, or continue after interruption. <code>replaceSkillSurface()</code> refreshes descriptions and commands without replacing the session object. <code>getVariables()</code> exposes the last plan, last answer, execution variables, and status.</p></section></main><div id="site-footer"></div><script src="partials-loader.js"></script></body></html>

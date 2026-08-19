@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AchillesAgentLib Documentation</title><link rel="stylesheet" href="styles.css">
+    <script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script>
+</head>
+<body>
+    <div id="site-header" data-breadcrumb='[{"label":"Home","href":"index.html"},{"label":"MainAgent"}]'></div>
+    <main class="content"><section class="lead"><h1>MainAgent</h1><p>An application can integrate AchillesAgentLib through <a href="wiki.html#definition-main-agent">MainAgent</a>, the package entry point for workspace skill discovery and conversational execution. The application creates one instance, then calls <code>executePrompt()</code> for a reusable conversation or <code>executeSkill()</code> for direct named-skill execution.</p></section>
+    <section><h2>Request execution</h2><p>The first <code>executePrompt()</code> call builds tools from enabled top-level skills and asks <a href="wiki.html#definition-llm-agent">LLMAgent</a> to create a <a href="wiki.html#definition-loop-session">LoopAgentSession</a>. MainAgent stores that session in <code>_session</code>. Later calls use <code>newPrompt()</code>, preserving conversation history while allowing explicit model, tags, reasoning effort, and abort signal values for the new turn.</p>
+    <figure class="diagram"><pre class="mermaid">flowchart TB
+      U[Application calls executePrompt] --> M[MainAgent discovers enabled tools and owns the reusable session]
+      M --> S[LoopAgentSession plans, invokes tools, and keeps conversation state]
+      S --> L[LLMAgent resolves the model and invokes the configured provider]
+      L --> S
+      S --> R[MainAgent returns result and session status]
+      classDef caller fill:#eef4ff,stroke:#1c4f9c,color:#0f2557;
+      classDef runtime fill:#f5f1ff,stroke:#6657b8,color:#2d246b;
+      classDef provider fill:#eefbf4,stroke:#28875d,color:#174c38;
+      class U,R caller; class M,S runtime; class L provider;</pre><figcaption><em>MainAgent request execution flow</em></figcaption></figure>
+    <p><code>initialHistory</code> may hydrate only a newly created session. MainAgent rejects non-empty initial history after the reusable session exists, preventing duplicate history injection. <code>cancelCurrentSession()</code> forwards cancellation to both the session and LLMAgent.</p></section>
+    <section><h2>Security supervision</h2><p>MainAgent creates a default <a href="wiki.html#definition-security-supervisor">SecuritySupervisor</a> unless the application supplies another supervisor through the constructor. For each new <code>executePrompt()</code> session, MainAgent passes the effective supervisor to <code>LLMAgent.startLoopAgentSession()</code>, which stores it on the LoopAgentSession.</p><p>Before a controlled tool runs, the session asks the supervisor whether execution is approved, denied, or approved persistently for the same operation. The supervisor therefore controls permission decisions at the tool boundary; it does not select tools, call the model, or execute skill code. When a session invokes a skill tool, MainAgent also forwards the parent session's supervisor in the execution options so nested skill or orchestration work can preserve the same approval authority.</p><table><thead><tr><th>Stage</th><th>Supervisor role</th></tr></thead><tbody><tr><td>MainAgent construction</td><td>Uses the application-supplied supervisor or creates <code>SecuritySupervisor</code>.</td></tr><tr><td>Session creation</td><td>Passes the effective supervisor into the new LoopAgentSession.</td></tr><tr><td>Tool execution</td><td>The session requests an approval decision before invoking a controlled tool.</td></tr><tr><td>Nested skill execution</td><td>MainAgent forwards the parent session supervisor and any approval metadata to the delegated skill.</td></tr></tbody></table></section>
+    <section><h2>Primary methods</h2><table><thead><tr><th>Method</th><th>Responsibility</th></tr></thead><tbody>
+    <tr><td><code>executePrompt(message, options)</code></td><td>Creates or reuses the Loop session and returns its latest result and status.</td></tr>
+    <tr><td><code>executeSkill(name, prompt, options)</code></td><td>Resolves an enabled skill and delegates execution to its specialized subsystem.</td></tr>
+    <tr><td><code>buildSkills()</code></td><td>Runs enabled skills' asynchronous build hooks in parallel and isolates failures per skill.</td></tr>
+    <tr><td><code>refreshSkills()</code></td><td>Rediscovers workspace skills, reports additions, updates, and removals, and refreshes tools in the active session.</td></tr>
+    <tr><td><code>enableSkills()</code> / <code>disableSkills()</code></td><td>Validates a complete name batch before changing enabled state and refreshing the visible tool surface.</td></tr>
+    <tr><td><code>getSkills()</code> / <code>getSkillRecord()</code></td><td>Expose the canonical catalog and alias-based lookup.</td></tr>
+    <tr><td><code>cancelCurrentSession()</code></td><td>Interrupts the active session and in-flight model requests.</td></tr>
+    <tr><td><code>shutdown()</code></td><td>Cancels work, closes subsystems, clears the session, and closes the logger.</td></tr>
+    </tbody></table></section>
+    <section><h2>Skill discovery and boundaries</h2><p>MainAgent searches below <code>startDir</code> for supported descriptors. Package-internal skills are excluded by default and become available when <code>disableInternalSkills</code> is <code>false</code>. User skills are registered after internal skills, so a matching canonical user skill replaces the internal record. Disabled skills are excluded from direct execution, builds, and session tools.</p><p>Subsystems own descriptor parsing, preparation, builds, and execution. MainAgent owns catalog state and routing; <a href="llm-agent.html">LLMAgent</a> owns model interaction; the session owns conversational memory and step control.</p></section></main>
+    <div id="site-footer"></div><script src="partials-loader.js"></script>
+</body></html>

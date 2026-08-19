@@ -1,54 +1,18 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LLMAgent · Achilles Agents Docs</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <div id="site-header"
-        data-breadcrumb='[
-            {"label":"Home","href":"index.html"},
-            {"label":"LLMAgent"}
-        ]'></div>
-
-    <main class="content">
-        <section class="lead">
-            <h1>LLMAgent</h1>
-            <p>LLMAgent is the foundational mediation layer through which AchillesAgentLib interacts with language models. It is the component that turns provider-facing model calls into a reusable runtime service for prompting, output coercion, interpretation, and agentic session creation.</p>
-        </section>
-
-        <section>
-            <h2>Controlled Model Mediation</h2>
-            <p>Higher-level components in AchillesAgentLib are not expected to talk directly to providers. That work is concentrated in LLMAgent so that prompt execution, memory shaping, output coercion, and call logging remain consistent across the rest of the runtime. The architectural value of this class is therefore not only convenience. It is that it prevents every subsystem from inventing its own model-calling conventions.</p>
-            <p>This becomes especially important once the same runtime must support plain completions, structured JSON extraction, code-oriented responses, confirmation resolution, intent detection, and long-lived sessions. In a looser architecture, each of these concerns would drift into local conventions. In AchillesAgentLib they are pulled into one shared mediation surface. MainAgent and the skill subsystems then build on that common layer rather than bypassing it. MainAgent owns skill discovery, registration, and routing, while LLMAgent remains the dedicated model mediation layer.</p>
-            <p>The practical result is that LLMAgent sits between the rest of the runtime and the underlying invoker strategy. It does not remove the probabilistic nature of the model, but it does make the path to that model more explicit, more inspectable, and easier to keep stable.</p>
-        </section>
-
-        <section>
-            <h2>Prompt Execution, Interpretation, and Sessions</h2>
-            <p>The lowest direct method is <code>complete()</code>. It expects a prompt string and optional history, model, tags, context, and cancellation signal, forwards those values to the configured invoker strategy, records input and output character counts, logs per-call telemetry, and returns the provider output as a string. Model resolution happens inside the invoker strategy: when an explicit model is provided it is used directly; when only tags are provided, the invoker looks up the first tag in the agent's <code>modelConfig</code> mapping and uses the associated model name. If neither model nor tags resolve to a concrete name, the invoker falls back to the configured default model. This is the most direct general-purpose surface offered by the class.</p>
-            <p><code>executePrompt()</code> builds on that lower layer. It can prepend memory segments such as global, user, session, or skill short memory to the prompt context and then routes the request through the task-execution helper. When <code>responseShape</code> is declared, it also performs bounded post-processing on the returned text. For <code>json</code>, it extracts JSON and throws if parsing fails. For <code>code</code>, it strips code fences. For <code>json-code</code>, it extracts a JSON object and requires that the object contain a <code>code</code> field. The method therefore does not “understand” arbitrary schemas, but it does centralize the output-coercion patterns used by the rest of the runtime.</p>
-            <pre><code>const result = await llmAgent.executePrompt('Summarize the report', {
-    model: 'plan',
-    responseShape: 'json',
-    context: { intent: 'summarize-report' },
-    sessionMemory,
-});</code></pre>
-            <p>Alongside prompt execution, LLMAgent also exposes a small set of interpretation helpers. <code>interpretMessage()</code> converts free-form user replies into constrained outcomes such as <code>accept</code>, <code>cancel</code>, <code>update</code>, or idea-like payloads, using heuristics first and the model second. <code>resolveConfirmation()</code> resolves ambiguous yes-or-no language into <code>yes</code>, <code>no</code>, or <code>unclear</code> together with a confidence value. <code>detectIntents()</code> classifies a request against a described skill space and parses markdown sections into the resulting skill map. These methods are important because they allow natural language to be turned into bounded operational signals rather than leaving every caller to parse conversational text independently.</p>
-            <p>The third major responsibility is session creation. <code>startLoopAgentSession()</code> creates a loop-based session over a tools object and immediately starts it with the initial prompt. It may also receive creation-only <code>initialHistory</code> as ordered user/assistant <code>{ role, message }</code> records, which the loop runtime validates and hydrates before the current prompt. <code>startSOPLangAgentSession()</code> creates an SOP-based session over a skills description object and likewise starts it immediately, with optional <code>planOnly</code> behavior. Both entry points accept an abort signal and propagate it into the active session runtime. The detailed behavior of those session types is documented on <a href="agentic-sessions.html">Agentic Sessions</a>, but their common entry point is LLMAgent.</p>
-            <pre><code>const loopSession = await llmAgent.startLoopAgentSession(tools, 'Start the workflow');
-
-const sopSession = await llmAgent.startSOPLangAgentSession(skillsDescription, 'Run the plan', {
-    planOnly: false,
-});</code></pre>
-            <p>Failures stay attached to the model or provider call that produced them. An adapter response now identifies whether it was <code>null</code>, <code>undefined</code>, an object with a non-text <code>output</code>, or another unsupported shape. HTTP failures remain short and use the standard status phrase, such as <code>401 - Unauthorized</code> or <code>500 - Internal Server Error</code>; serialized provider response bodies are not copied into ordinary error text. JSON, code, and Markdown coercion failures likewise name the required output contract without reproducing the model response.</p>
-            <p>Two additional operational details complete the picture. First, <code>cancel()</code> forwards cancellation to the underlying request layer and attempts to close active processing callbacks. Session runtimes also rely on this capability when the user interrupts a running turn. Second, <code>getCallLog()</code> returns the per-call telemetry accumulated by the agent, including input size, output size, model, requested tags, matched tags, duration, and intent. This makes LLMAgent not only a prompt wrapper, but the general LLM-facing runtime service on top of which the rest of the library is built.</p>
-        </section>
-    </main>
-
-    <div id="site-footer"></div>
-    <script src="partials-loader.js"></script>
-</body>
-</html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AchillesAgentLib Documentation</title><link rel="stylesheet" href="styles.css"><script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script></head>
+<body><div id="site-header" data-breadcrumb='[{"label":"Home","href":"index.html"},{"label":"LLMAgent"}]'></div><main class="content">
+<section class="lead"><h1>LLMAgent</h1><p><a href="wiki.html#definition-llm-agent">LLMAgent</a> is the single package class through which model prompts, interpretation helpers, response coercion, and agentic-session creation reach the configured provider layer.</p></section>
+<section><h2>Main methods</h2><table><thead><tr><th>Method</th><th>Verified behavior</th></tr></thead><tbody>
+<tr><td><code>complete(options)</code></td><td>Central model-call hub. It resolves model configuration, invokes the strategy, counts input and output characters, and logs call metadata.</td></tr>
+<tr><td><code>executePrompt(promptText, options)</code></td><td>Prepends supplied global, user, session, and skill memory and optionally coerces the result as JSON, code, or JSON containing code.</td></tr>
+<tr><td><code>interpretMessage(message, options)</code></td><td>Classifies accept, cancel, update, or configured intents with heuristics first and an LLM fallback for ambiguous text.</td></tr>
+<tr><td><code>resolveConfirmation(input, options)</code></td><td>Returns yes, no, or unclear by checking explicit phrases before using a model fallback.</td></tr>
+<tr><td><code>detectIntents(skills, prompt, options)</code></td><td>Requests Markdown intent sections and parses them into a structured skill-and-intent result.</td></tr>
+<tr><td><code>startLoopAgentSession(tools, prompt, options)</code></td><td>Creates a bounded adaptive session, executes its initial turn, and returns the live session.</td></tr>
+<tr><td><code>startSOPLangAgentSession(skills, prompt, options)</code></td><td>Creates a plan-first LightSOPLang session, executes its initial turn, and returns the live session.</td></tr>
+<tr><td><code>setModelConfig(config)</code></td><td>Replaces tag-to-model mappings or restores defaults loaded by the runtime configuration.</td></tr>
+<tr><td><code>getInputCounter()</code> / <code>getOutputCounter()</code></td><td>Return cumulative character counts used by evaluation and telemetry code.</td></tr>
+<tr><td><code>cancel()</code></td><td>Requests cancellation of in-flight provider calls.</td></tr>
+</tbody></table></section>
+<section><h2>Model selection contract</h2><p>The integrating application may pass a concrete <code>model</code>, semantic <code>tags</code>, and <code>reasoningEffort</code>. An application-supplied <code>modelConfig</code> is the manual override for tag mappings; otherwise LLMAgent builds mappings from runtime defaults. Provider configuration may come from <code>LLMConfig.json</code>, <code>LLM_MODELS_CONFIG_PATH</code>, or supported environment variables. Routing-sensitive work should use tags such as <code>documentation</code>, <code>specification</code>, <code>orchestration</code>, <code>bootstrap</code>, and <code>testing</code> when configured by the application.</p></section>
+<section><h2>Ownership boundary</h2><p>LLMAgent does not discover skills and does not own long-lived conversation state. <a href="main-agent.html">MainAgent</a> assembles the tool surface, while <a href="agentic-sessions.html">agentic sessions</a> store history, plans, tool results, and continuation state.</p></section></main><div id="site-footer"></div><script src="partials-loader.js"></script></body></html>

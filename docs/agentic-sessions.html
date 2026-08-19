@@ -1,102 +1,15 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agentic Sessions · Achilles Agents Docs</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <div id="site-header"
-        data-breadcrumb='[
-            {"label":"Home","href":"index.html"},
-            {"label":"Agentic Sessions"}
-        ]'></div>
-
-    <main class="content content--with-sidebar">
-        <div class="doc-layout">
-            <aside class="doc-sidebar" aria-label="Agentic session chapter navigation">
-                <p class="doc-sidebar__title">Session Chapters</p>
-                <nav>
-                    <a href="agentic-sessions.html" aria-current="page">Overview</a>
-                    <a href="agentic-sessions-loop.html">Loop Sessions</a>
-                    <a href="agentic-sessions-sop.html">SOP Sessions</a>
-                </nav>
-            </aside>
-
-            <div class="doc-main">
-                <section class="lead">
-                    <h1>Agentic Sessions</h1>
-                    <p>Agentic sessions are the bounded execution structures through which AchillesAgentLib carries multi-step work across planning, tool or skill invocation, intermediate state, and stopping conditions. In the current implementation, the runtime exposes two complementary session regimes: a loop-based mode for adaptive step-by-step deliberation and a SOP-based mode for plan-first execution through Plan SOPlang.</p>
-                </section>
-
-                <section>
-                    <h2>Bounded Multi-Step Execution</h2>
-                    <p>In AchillesAgentLib, an agentic session is not a metaphorical “brain” and not a loose chat wrapper. It is a concrete runtime object with explicit state, explicit completion signals, and explicit execution boundaries. The two session classes, <code>LoopAgentSession</code> in <code>LLMAgents/LoopAgenticSession/LoopAgentSession.mjs</code> and <code>SOPAgenticSession</code> in <code>LLMAgents/SOPAgenticSession/SOPAgenticSession.mjs</code>, are created by <code>LLMAgent</code> through <code>startLoopAgentSession()</code> and <code>startSOPLangAgentSession()</code>. From that point onward, the session becomes the local structure that holds the evolving execution trace, the latest answer, the intermediate variables, and the current status.</p>
-                    <p>This distinction matters because the rest of the runtime builds on it directly. Orchestration skills use these sessions as their execution substrate. The two regimes should therefore be understood as complementary orchestration styles over the same skill ecosystem rather than as unrelated mechanisms. One favors adaptive local replanning at each step. The other favors explicit plan compilation followed by structured execution.</p>
-                    <p>Both regimes also share a common stopping contract. They reserve the completion names <code>final_answer</code> and <code>cannot_complete</code> and add them to the active tool or command surface automatically. A session does not simply end when the text looks plausible. It ends when execution reaches one of these bounded completion signals, when an interactive pause is raised, when an interruption request cancels the active turn, or when the configured budgets and error conditions force termination.</p>
-                    <p>The session objects themselves are ordinary in-memory JavaScript structures, but loop-based subsystems may store them in <code>sessionMemory</code> when they pause in <code>awaiting_input</code> state and may resume them on the next user message. The important point is therefore not persistence to disk, but governed continuity of execution across turns.</p>
-
-                    <div class="session-diagram">
-                        <div class="session-diagram__intro">
-                            <p>The diagram below places the two execution regimes under the same runtime contract. The point of divergence is not the entry surface, but the way multi-step execution is governed after the session starts.</p>
-                        </div>
-                        <div class="session-diagram__entry">
-                            <strong>User prompt</strong><br>
-                            Request enters the runtime with current context and session state.
-                        </div>
-                        <div class="session-diagram__arrow" aria-hidden="true">↓</div>
-                        <div class="session-diagram__hub">
-                            <strong>LLMAgent session entry</strong><br>
-                            <code>startLoopAgentSession()</code> or <code>startSOPLangAgentSession()</code>
-                        </div>
-                        <div class="session-diagram__branches">
-                            <article class="session-branch session-branch--loop">
-                                <span class="session-branch__label">Loop Session</span>
-                                <h3>Adaptive execution path</h3>
-                                <div class="session-branch__flow">
-                                    <div class="session-step">optional preparation</div>
-                                    <div class="session-step">planner chooses next tool</div>
-                                    <div class="session-step">tool executes and stores result reference</div>
-                                    <div class="session-step">planner continues or stops</div>
-                                </div>
-                                <p class="session-branch__outcome"><strong>Outcomes:</strong> <code>final_answer</code>, <code>cannot_complete</code>, or <code>awaiting_input</code>. If paused, the session can be stored in <code>sessionMemory</code> and resumed later.</p>
-                            </article>
-                            <article class="session-branch session-branch--sop">
-                                <span class="session-branch__label">SOP Session</span>
-                                <h3>Plan-first execution path</h3>
-                                <div class="session-branch__flow">
-                                    <div class="session-step">optional preparation</div>
-                                    <div class="session-step">generate Plan SOPlang script</div>
-                                    <div class="session-step">execute plan through commands registry</div>
-                                    <div class="session-step">finish, repair, or resume pending command</div>
-                                </div>
-                                <p class="session-branch__outcome"><strong>Outcomes:</strong> final answer from the plan, bounded replanning on failure, or direct continuation of a pending command. In <code>planOnly</code>, execution stops after plan generation.</p>
-                            </article>
-                        </div>
-                        <div class="session-diagram__summary">
-                            <strong>Shared session contract.</strong>
-                            <ul>
-                                <li>Both regimes add <code>final_answer</code> and <code>cannot_complete</code> automatically.</li>
-                                <li>Both regimes maintain an explicit execution trace and expose <code>getLastResult()</code>.</li>
-                                <li>Both regimes can pause on interactive results instead of guessing past missing user input.</li>
-                                <li>Both regimes can enter <code>interrupted</code> state and recover on the next user prompt.</li>
-                            </ul>
-                        </div>
-                    </div>
-                </section>
-
-                <section>
-                    <h2>Two Complementary Regimes</h2>
-                    <p>The most useful distinction is not between simple and complex sessions, but between two different ways of governing multi-step execution. In the loop regime, the runtime keeps deciding the next admissible action during execution and stores intermediate results under symbolic references. In the SOP regime, the runtime first compiles a Plan SOPlang artifact and then executes that artifact under a bounded commands registry. The two approaches therefore differ in where deliberation occurs and how explicit the execution structure becomes before downstream work begins.</p>
-                    <p>The loop-specific contract, including result references, interactive continuation, execution limits, and the return surface of <code>LoopAgentSession</code>, is documented in <a href="agentic-sessions-loop.html">Loop Sessions</a>. The plan-first contract, including <code>skillsDescription</code>, <code>commandsRegistry</code>, <code>planOnly</code>, direct continuation of pending commands, and bounded replanning, is documented in <a href="agentic-sessions-sop.html">SOP Sessions</a>.</p>
-                    <p>This split is justified because the two session classes are not cosmetic variants of the same object. They expose different configuration surfaces, different state structures, and different operational failure modes. Keeping them under one overview page preserves the common architecture. Giving each regime its own chapter preserves technical precision.</p>
-                </section>
-            </div>
-        </div>
-    </main>
-
-    <div id="site-footer"></div>
-    <script src="partials-loader.js"></script>
-</body>
-</html>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AchillesAgentLib Documentation</title><link rel="stylesheet" href="styles.css"><script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script></head><body><div id="site-header" data-breadcrumb='[{"label":"Home","href":"index.html"},{"label":"Agentic Sessions"}]'></div><main class="content">
+<section class="lead"><h1>Agentic Sessions</h1><p>An <a href="wiki.html#definition-agentic-session">agentic session</a> turns one or more user prompts into bounded model decisions, approved tool calls, retained conversation state, and a final result.</p></section>
+<section><h2>Two execution regimes</h2><figure class="diagram"><pre class="mermaid">flowchart TB
+  P[Prompt and allowed tool surface] --> C{Execution regime}
+  C -->|adaptive next action| L[LoopAgentSession: decide and execute one step at a time]
+  C -->|plan-first dependencies| S[SOPAgenticSession: generate, validate, and run LightSOPLang]
+  L --> R[Answer, awaiting input, interruption, or bounded failure]
+  S --> R
+  classDef input fill:#eef4ff,stroke:#1c4f9c,color:#0f2557;
+  classDef decision fill:#fff7e8,stroke:#b7791f,color:#633c00;
+  classDef runtime fill:#f5f1ff,stroke:#6657b8,color:#2d246b;
+  classDef outcome fill:#eefbf4,stroke:#28875d,color:#174c38;
+  class P input; class C decision; class L,S runtime; class R outcome;</pre><figcaption><em>Agentic session execution regimes</em></figcaption></figure>
+<p><a href="agentic-sessions-loop.html">Loop Sessions</a> suit tasks whose next action depends on each result. <a href="agentic-sessions-sop.html">SOP Sessions</a> suit orchestration that benefits from an explicit dependency plan, validation, parallel readiness, and bounded replanning.</p></section>
+<section><h2>Shared contract</h2><p>Both session types use <a href="wiki.html#definition-llm-agent">LLMAgent</a> for model calls, enforce a supplied tool or command boundary, support a supervisor, carry model tags and reasoning effort, expose the latest result, and propagate cancellation through abort signals. They retain state in memory for continuation but do not persist themselves across process restarts.</p></section></main><div id="site-footer"></div><script src="partials-loader.js"></script></body></html>
