@@ -11,13 +11,13 @@
     <div id="site-header"
         data-breadcrumb='[
             {"label":"Home","href":"index.html"},
-            {"label":"Ploinky Agent Skills"}
+            {"label":"Ploinky Agents as Skills"}
         ]'></div>
 
     <main class="content content--with-sidebar">
         <div class="doc-layout">
-            <aside class="doc-sidebar" aria-label="Ploinky chapter navigation">
-                <p class="doc-sidebar__title">Ploinky Chapters</p>
+            <aside class="doc-sidebar" aria-label="Ploinky agents as skills chapter navigation">
+                <p class="doc-sidebar__title">Ploinky Agents as Skills</p>
                 <nav>
                     <a href="ploinky-skills.html" aria-current="page">Overview</a>
                 </nav>
@@ -25,8 +25,8 @@
 
             <div class="doc-main">
                 <section class="lead">
-                    <h1>Ploinky Agent Skills</h1>
-                    <p>Ploinky Agent Skills is a dynamic coordination subsystem that enables orchestrator skills to discover and call remote Ploinky agents through the router. It does not participate in filesystem skill discovery and has no descriptor file type.</p>
+                    <h1>Ploinky Agents as Skills</h1>
+                    <p>A Ploinky agent can be exposed as a skill only inside an orchestration skill, or o-skill. The agent's <code>agent-card</code> payload acts as its runtime descriptor and supplies the metadata used to describe the generated tool. Unlike filesystem-discovered skills, the Ploinky agent has no static descriptor and no <code>.md</code> descriptor file of its own.</p>
                 </section>
 
                 <section>
@@ -42,8 +42,8 @@
                 </section>
 
                 <section>
-                    <h2>Descriptor Section</h2>
-                    <p>An orchestrator declares remote agents through the <code>## Allowed Agents</code> section (aliases: <code>allowed-agents</code>, <code>agents</code>, <code>agent-allowlist</code>):</p>
+                    <h2>O-Skill Declaration</h2>
+                    <p>The owning o-skill uses its own <code>oskill.md</code> descriptor to declare remote agents through the <code>## Allowed Agents</code> section (aliases: <code>allowed-agents</code>, <code>agents</code>, <code>agent-allowlist</code>):</p>
                     <pre><code>## Allowed Agents
 
 - openaiAgent

@@ -25,7 +25,7 @@ MainAgent must remain the canonical registry of discovered, enabled, disabled, c
 
 Code skills must use `cskill.md` to describe executable ESM kept in the skill folder. Dynamic-code skills must use their own descriptor and may decide at runtime whether a request needs generated code or a text result. Orchestration skills must define coordination work and choose Loop or SOP execution according to their descriptor and plan requirements.
 
-DBTable skills must preserve database-oriented table definitions, generated controllers, operation validation, and timeout boundaries. Ploinky agent skills must preserve the remote discovery and invocation boundary of router-exposed agents rather than copying them into the local code-skill contract.
+DBTable skills must preserve database-oriented table definitions, generated controllers, operation validation, and timeout boundaries. A Ploinky agent may be exposed as a skill only within an o-skill that declares it through `Allowed Agents`. The Ploinky agent's `agent-card` payload provides its runtime descriptor metadata and tool description; the agent does not participate in filesystem skill discovery and has no static `.md` descriptor file of its own. Ploinky agent skills must preserve this remote discovery and invocation boundary rather than copying agents into the local code-skill contract.
 
 The existence of these families is architectural, not cosmetic. Their descriptors and lifecycles may differ because the work has different safety, validation, generation, and execution requirements.
 
