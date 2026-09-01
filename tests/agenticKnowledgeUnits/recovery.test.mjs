@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AgenticKnowledgeUnits } from '../../AgenticKnowledgeUnits/index.mjs';
+import { AgenticKnowledgeUnits, AKUError } from '../../AgenticKnowledgeUnits/index.mjs';
 
 async function fixture() {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aku-recovery-'));
@@ -47,4 +47,25 @@ test('doctor repairs pending markers, corrupt JSONL, missing indexes, stale lock
     report = await aku.doctor({ autoRepair: true });
     assert.equal(report.ok, true);
     assert.ok(report.issues.some(issue => issue.code === 'AKU_STALE_LOCK'));
+});
+
+test('lock operations and recovery reject symlinked owned lock directories', async () => {
+    const { rootDir, aku, ku } = await fixture();
+    const akuRoot = path.join(rootDir, '.aku');
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'aku-lock-outside-'));
+
+    await fs.symlink(outside, path.join(akuRoot, 'lock'));
+    await assert.rejects(
+        () => aku.initKU({ ku_name: 'Blocked root lock', summary: 'must not write through lock symlink' }),
+        AKUError,
+    );
+    await assert.rejects(() => aku.doctor({ autoRepair: true }), AKUError);
+
+    await fs.unlink(path.join(akuRoot, 'lock'));
+    await fs.symlink(outside, path.join(akuRoot, 'kus', ku.ku_id, 'lock'));
+    await assert.rejects(
+        () => aku.recordDocument(ku.ku_id, { title: 'Blocked KU lock', summary: 'must fail closed' }),
+        AKUError,
+    );
+    await assert.rejects(() => aku.doctor({ autoRepair: true }), AKUError);
 });

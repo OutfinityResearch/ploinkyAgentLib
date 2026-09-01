@@ -11,7 +11,7 @@ summary: Defines AKU as deterministic, agent-managed project memory with validat
 
 ### Knowledge Unit Model
 
-An AKU root must contain independently addressable Knowledge Units and aggregate indexes. A Knowledge Unit must group related project knowledge with its manifest, status, documents, registered files and folders, links, events, runs, results, validations, and ingested session information.
+An AKU persistence root must contain independently addressable Knowledge Units and aggregate indexes. The configured project root remains separate and bounds ordinary project-file and folder registration. A Knowledge Unit must group related project knowledge with its manifest, status, documents, registered files and folders, links, events, runs, results, validations, and ingested session information.
 
 The API must support root and Knowledge Unit initialization, loading, state updates, evidence records, file and folder registration, links, session ingestion, forks, discard, and explicitly confirmed physical deletion. Status changes must affect normal retrieval without silently erasing the underlying record.
 
@@ -21,7 +21,7 @@ Every record must be normalized and validated through local schemas before persi
 
 Aggregate indexes must support both incremental updates and complete rebuilding from authoritative Knowledge Unit records. `doctor()` and optional automatic repair must detect supported inconsistencies and repair derived state without inventing missing documents, relationships, results, or meaning.
 
-The configured AKU root is a hard storage boundary. Paths must remain within that root, existing symlink paths and sensitive locations must be rejected according to the path policy, and AKU must not persist into unrelated project locations.
+The configured AKU persistence root is a hard storage boundary for records, indexes, locks, pending transactions, and metadata. Paths must remain within that root, and the root must be revalidated before reads, recovery, writes, and destructive operations. A caller-supplied root that is itself a symbolic link, including an explicit alias at the legacy `.aku` location, must be rejected. The owned `pending`, `kus`, root-lock, and per-KU lock paths must reject symbolic links before scanning, reading, writing, or removal. Sensitive locations must be rejected according to the path policy, and AKU must not persist into unrelated project locations. The optional `persistenceRoot` constructor setting must not change the project root used to validate registered project files and folders. Omitting it retains the project-local `.aku` default for unrelated consumers.
 
 ### Deterministic Search
 

@@ -1,4 +1,3 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ALL_INDEX_FILES, ROOT_FILES, ROOT_LOCK_NAME } from './constants.mjs';
 import { AKU_ERROR_CODES, AKUError } from './errors.mjs';
@@ -89,7 +88,7 @@ export class AKUDoctor {
         const required = [ROOT_FILES.indexMeta, ...ALL_INDEX_FILES];
         for (const name of required) {
             try {
-                await fs.stat(this.store.rootFile(name));
+                await this.store.statOwned(this.store.rootFile(name));
             } catch (error) {
                 if (error?.code === 'ENOENT') {
                     issues.push(issue(AKU_ERROR_CODES.AKU_REBUILD_REQUIRED, `Missing AKU index file: ${name}`, this.store.rootFile(name)));
@@ -169,7 +168,7 @@ export class AKUDoctor {
         }
         for (const lockPath of lockPaths) {
             try {
-                await fs.stat(lockPath);
+                await this.store.statOwned(lockPath);
             } catch (error) {
                 if (error?.code === 'ENOENT') {
                     continue;
@@ -190,7 +189,7 @@ export class AKUDoctor {
     async removePendingMarkers(issues) {
         const pending = await this.store.listPendingTransactions();
         for (const marker of pending) {
-            await fs.rm(marker, { force: true });
+            await this.store.removeOwned(marker, { force: true });
         }
         for (const item of issues) {
             if (item.code === AKU_ERROR_CODES.AKU_TRANSACTION_PENDING) {

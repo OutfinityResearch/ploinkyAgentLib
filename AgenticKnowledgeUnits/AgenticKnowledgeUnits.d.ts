@@ -1,5 +1,6 @@
 export interface AgenticKnowledgeUnitsOptions {
     rootDir?: string;
+    persistenceRoot?: string;
     actor?: string;
     contextBudgetChars?: number;
     lockTimeoutMs?: number;

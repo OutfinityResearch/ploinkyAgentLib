@@ -50,7 +50,16 @@ agent.shutdown();
 
 The application keeps the MainAgent instance for as long as it needs the conversation. `executePrompt()` creates one LoopAgentSession on the first call and reuses it for later prompts. `executeSkill()` resolves one enabled skill and delegates directly to its subsystem.
 
-AgenticKnowledgeUnits can be imported from the package root when the application needs explicit durable project memory.
+AgenticKnowledgeUnits can be imported from the package root when the application needs explicit durable project memory. Its `rootDir` option defines the project-file boundary used by registration APIs, while `persistenceRoot` may independently select the directory that owns every AKU record, index, lock, and pending transaction. When `persistenceRoot` is omitted, non-Ploinky consumers retain the project-local `<rootDir>/.aku` default.
+
+~~~js
+import { AgenticKnowledgeUnits } from 'ploinky-agent-lib';
+
+const memory = new AgenticKnowledgeUnits({
+    rootDir: '/workspace/project',
+    persistenceRoot: '/workspace/.data/my-agent/aku'
+});
+~~~
 
 ## Verification
 

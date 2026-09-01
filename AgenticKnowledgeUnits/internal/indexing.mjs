@@ -157,7 +157,7 @@ export class AKUIndexBuilder {
             files: fileInfo,
             source: {
                 ku_root_version: akuConfig.ku_root_version ?? 0,
-                built_from: '.aku/kus',
+                built_from: 'kus',
                 build_options_hash: sha256Object({
                     schema: INDEX_SCHEMA_VERSION,
                     fields: SEARCH_FIELDS,

@@ -56,3 +56,23 @@ test('public lifecycle covers KU records, search, pack, fork, discard, and delet
     await aku.deleteKU(fork.ku_id, { confirm: true });
     assert.equal((await aku.listKUs({ includeDiscarded: true })).some(item => item.ku_id === fork.ku_id), false);
 });
+
+test('explicit persistence root stores AKU state while file registration stays project-relative', async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aku-project-'));
+    const persistenceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aku-private-'));
+    await fs.writeFile(path.join(rootDir, 'source.txt'), 'source');
+    const aku = new AgenticKnowledgeUnits({ rootDir, persistenceRoot, actor: 'test' });
+
+    await aku.initAKU({ name: 'separated roots' });
+    const ku = await aku.initKU({ ku_name: 'Project evidence' });
+    await aku.registerFile(ku.ku_id, { path: 'source.txt', summary: 'registered project file' });
+
+    const loaded = await aku.loadKU(ku.ku_id);
+    assert.equal(loaded.files[0].path, 'source.txt');
+    assert.equal(await fs.readFile(path.join(rootDir, 'source.txt'), 'utf8'), 'source');
+    assert.equal(await fs.stat(path.join(persistenceRoot, 'aku.json')).then(stat => stat.isFile()), true);
+    assert.equal(await fs.stat(path.join(persistenceRoot, 'search-index.jsonl')).then(stat => stat.isFile()), true);
+    assert.equal(await fs.stat(path.join(persistenceRoot, 'kus', ku.ku_id, 'support', 'files.jsonl'))
+        .then(stat => stat.isFile()), true);
+    await assert.rejects(() => fs.stat(path.join(rootDir, '.aku')), { code: 'ENOENT' });
+});

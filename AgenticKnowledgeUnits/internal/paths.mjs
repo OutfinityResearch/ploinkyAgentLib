@@ -11,6 +11,83 @@ export function resolveAkuRoot(rootDir = process.cwd()) {
     return path.join(resolveRootDir(rootDir), AKU_DIRNAME);
 }
 
+export function resolvePersistenceRoot(persistenceRoot, rootDir = process.cwd()) {
+    if (persistenceRoot === undefined || persistenceRoot === null || persistenceRoot === '') {
+        return resolveAkuRoot(rootDir);
+    }
+    if (typeof persistenceRoot !== 'string' || !persistenceRoot.trim()) {
+        throw new AKUError(
+            AKU_ERROR_CODES.AKU_PATH_ESCAPE,
+            'Persistence root must be a non-empty path string',
+            { persistenceRoot },
+        );
+    }
+    return path.resolve(persistenceRoot);
+}
+
+export async function assertSafePersistenceRoot(persistenceRoot, projectRoot) {
+    const target = path.resolve(persistenceRoot);
+    const project = path.resolve(projectRoot);
+    const commonRoot = commonPathAncestor(project, target);
+    try {
+        const commonStat = await fs.lstat(commonRoot);
+        if (commonStat.isSymbolicLink()) {
+            throw new AKUError(AKU_ERROR_CODES.AKU_PATH_ESCAPE, 'Symlinks are not allowed inside AKU persistence paths', {
+                path: commonRoot,
+            });
+        }
+    } catch (error) {
+        if (error instanceof AKUError) {
+            throw error;
+        }
+        if (error?.code !== 'ENOENT') {
+            throw error;
+        }
+    }
+    await assertNoSymlinkInExistingPath(target, commonRoot);
+    try {
+        const stat = await fs.lstat(target);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) {
+            throw new AKUError(AKU_ERROR_CODES.AKU_PATH_ESCAPE, 'AKU persistence root must be a real directory', {
+                path: target,
+            });
+        }
+    } catch (error) {
+        if (error instanceof AKUError) {
+            throw error;
+        }
+        if (error?.code !== 'ENOENT') {
+            throw error;
+        }
+    }
+    return target;
+}
+
+export async function assertSafePersistencePath(persistenceRoot, targetPath) {
+    const root = path.resolve(persistenceRoot);
+    const target = path.resolve(targetPath);
+    if (!isWithin(root, target)) {
+        throw new AKUError(AKU_ERROR_CODES.AKU_PATH_ESCAPE, 'Resolved path escapes the AKU persistence root', {
+            root,
+            target,
+        });
+    }
+    try {
+        const stat = await fs.lstat(root);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) {
+            throw new AKUError(AKU_ERROR_CODES.AKU_PATH_ESCAPE, 'AKU persistence root must be a real directory', {
+                path: root,
+            });
+        }
+    } catch (error) {
+        if (error instanceof AKUError) throw error;
+        if (error?.code !== 'ENOENT') throw error;
+        return target;
+    }
+    await assertNoSymlinkInExistingPath(target, root);
+    return target;
+}
+
 export function normalizeRelativePath(input) {
     if (typeof input !== 'string' || !input.trim()) {
         throw new AKUError(AKU_ERROR_CODES.AKU_PATH_ESCAPE, 'Path must be a non-empty relative string', { path: input });
@@ -127,4 +204,15 @@ export function displayPathFromAkuRoot(akuRoot, absolutePath) {
 
 export function projectDisplayPath(rootDir, absolutePath) {
     return path.relative(rootDir, absolutePath).replace(/\\/g, '/');
+}
+
+function commonPathAncestor(leftPath, rightPath) {
+    const left = path.resolve(leftPath).split(path.sep);
+    const right = path.resolve(rightPath).split(path.sep);
+    const shared = [];
+    const count = Math.min(left.length, right.length);
+    for (let index = 0; index < count && left[index] === right[index]; index += 1) {
+        shared.push(left[index]);
+    }
+    return path.resolve(shared.join(path.sep) || path.parse(leftPath).root);
 }

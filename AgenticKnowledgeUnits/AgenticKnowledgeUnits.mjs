@@ -1,4 +1,3 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { AtomicFileWriter } from './internal/atomic-write.mjs';
 import {
@@ -38,8 +37,10 @@ export class AgenticKnowledgeUnits {
 
         this.store = new AKUFileStore({
             rootDir: this.rootDir,
+            persistenceRoot: options.persistenceRoot,
             allowSensitivePaths: options.allowSensitivePaths,
         });
+        this.persistenceRoot = this.store.akuRoot;
         this.tokenizer = new AKUTokenizer();
         this.lockManager = new AKULockManager({
             akuRoot: this.store.akuRoot,
@@ -125,7 +126,7 @@ export class AgenticKnowledgeUnits {
         const rootLock = await this.lockManager.acquire('root', { label: 'initKU' });
         try {
             try {
-                await fs.stat(this.store.kuDir(manifest.ku_id));
+                await this.store.statOwned(this.store.kuDir(manifest.ku_id));
                 throw new AKUError(AKU_ERROR_CODES.AKU_ALREADY_EXISTS, `KU already exists: ${manifest.ku_id}`, {
                     kuId: manifest.ku_id,
                 });
@@ -494,7 +495,7 @@ export class AgenticKnowledgeUnits {
         const rootLock = await this.lockManager.acquire('root', { label: 'forkKU' });
         try {
             try {
-                await fs.stat(this.store.kuDir(manifest.ku_id));
+                await this.store.statOwned(this.store.kuDir(manifest.ku_id));
                 throw new AKUError(AKU_ERROR_CODES.AKU_ALREADY_EXISTS, `KU already exists: ${manifest.ku_id}`, {
                     kuId: manifest.ku_id,
                 });
@@ -549,7 +550,7 @@ export class AgenticKnowledgeUnits {
         }
         let deleted = false;
         await this.withKUTransaction(kuId, 'deleteKU', async () => {
-            await fs.rm(this.store.kuDir(kuId), { recursive: true, force: true });
+            await this.store.removeOwned(this.store.kuDir(kuId), { recursive: true, force: true });
             deleted = true;
         }, { skipSourceExistenceCheck: true });
         return { ku_id: kuId, deleted };
@@ -838,7 +839,7 @@ export class AgenticKnowledgeUnits {
         validateKuId(kuId);
         await this.ensureAKU();
         try {
-            await fs.stat(this.store.kuDir(kuId));
+            await this.store.statOwned(this.store.kuDir(kuId));
         } catch (error) {
             if (error?.code === 'ENOENT') {
                 throw new AKUError(AKU_ERROR_CODES.AKU_NOT_FOUND, `KU not found: ${kuId}`, { kuId });
@@ -912,7 +913,7 @@ export class AgenticKnowledgeUnits {
         validateKuId(kuId);
         if (!options.skipSourceExistenceCheck) {
             try {
-                await fs.stat(this.store.kuDir(kuId));
+                await this.store.statOwned(this.store.kuDir(kuId));
             } catch (error) {
                 if (error?.code === 'ENOENT') {
                     throw new AKUError(AKU_ERROR_CODES.AKU_NOT_FOUND, `KU not found: ${kuId}`, { kuId });

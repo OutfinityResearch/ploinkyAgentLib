@@ -2,7 +2,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { PENDING_DIRNAME } from './constants.mjs';
+import { AKUError } from './errors.mjs';
 import { retryFsOperation } from './locking.mjs';
+import { assertSafePersistencePath } from './paths.mjs';
 import { isoNow } from './schemas.mjs';
 
 export class AtomicFileWriter {
@@ -17,7 +19,9 @@ export class AtomicFileWriter {
         const txnId = `txn_${Date.now()}_${randomBytes(4).toString('hex')}`;
         const pendingDir = path.join(this.akuRoot, PENDING_DIRNAME);
         const pendingPath = path.join(pendingDir, `${txnId}.json`);
+        await assertSafePersistencePath(this.akuRoot, pendingDir);
         await fs.mkdir(pendingDir, { recursive: true });
+        await assertSafePersistencePath(this.akuRoot, pendingDir);
         await this.writePendingMarker(pendingPath, label, txnId);
         let completed = false;
         const api = {
@@ -33,7 +37,10 @@ export class AtomicFileWriter {
         try {
             const result = await callback(api);
             completed = true;
-            await retryFsOperation(async () => fs.unlink(pendingPath));
+            await retryFsOperation(async () => {
+                await assertSafePersistencePath(this.akuRoot, pendingPath);
+                await fs.unlink(pendingPath);
+            });
             return result;
         } finally {
             if (completed) {
@@ -50,7 +57,8 @@ export class AtomicFileWriter {
             pid: process.pid,
             created_at: isoNow(this.clock),
         };
-        const handle = await fs.open(pendingPath, 'w');
+        await assertSafePersistencePath(this.akuRoot, pendingPath);
+        const handle = await fs.open(pendingPath, 'wx');
         try {
             await handle.writeFile(`${JSON.stringify(marker, null, 2)}\n`, 'utf8');
             await this.syncHandle(handle);
@@ -61,19 +69,27 @@ export class AtomicFileWriter {
     }
 
     async replaceFile(targetPath, content, txnId = 'txn') {
+        await assertSafePersistencePath(this.akuRoot, targetPath);
+        await assertSafePersistencePath(this.akuRoot, path.dirname(targetPath));
         await fs.mkdir(path.dirname(targetPath), { recursive: true });
+        await assertSafePersistencePath(this.akuRoot, path.dirname(targetPath));
         const tempPath = path.join(
             path.dirname(targetPath),
             `.${path.basename(targetPath)}.${txnId}.${randomBytes(4).toString('hex')}.tmp`,
         );
-        const handle = await fs.open(tempPath, 'w');
+        await assertSafePersistencePath(this.akuRoot, tempPath);
+        const handle = await fs.open(tempPath, 'wx');
         try {
             await handle.writeFile(content, 'utf8');
             await this.syncHandle(handle);
         } finally {
             await handle.close();
         }
-        await retryFsOperation(async () => fs.rename(tempPath, targetPath));
+        await retryFsOperation(async () => {
+            await assertSafePersistencePath(this.akuRoot, tempPath);
+            await assertSafePersistencePath(this.akuRoot, targetPath);
+            await fs.rename(tempPath, targetPath);
+        });
         await this.syncParentDirectory(path.dirname(targetPath));
     }
 
@@ -81,7 +97,7 @@ export class AtomicFileWriter {
         try {
             await handle.sync();
         } catch (error) {
-            if (this.strictFsync) {
+            if (error instanceof AKUError || this.strictFsync) {
                 throw error;
             }
         }
@@ -90,10 +106,11 @@ export class AtomicFileWriter {
     async syncParentDirectory(directoryPath) {
         let handle;
         try {
+            await assertSafePersistencePath(this.akuRoot, directoryPath);
             handle = await fs.open(directoryPath, 'r');
             await handle.sync();
         } catch (error) {
-            if (this.strictFsync) {
+            if (error instanceof AKUError || this.strictFsync) {
                 throw error;
             }
         } finally {

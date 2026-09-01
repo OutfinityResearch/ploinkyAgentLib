@@ -2,7 +2,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import {
-    AKU_DIRNAME,
     ALL_INDEX_FILES,
     KUS_DIRNAME,
     KU_DIRECTORIES,
@@ -14,10 +13,12 @@ import { AKU_ERROR_CODES, AKUError } from './errors.mjs';
 import { validateKuId } from './schemas.mjs';
 import {
     assertNoSymlinkInExistingPath,
+    assertSafePersistencePath,
+    assertSafePersistenceRoot,
     assertSafeIdSegment,
     normalizeRelativePath,
     projectDisplayPath,
-    resolveAkuRoot,
+    resolvePersistenceRoot,
     resolveRootDir,
     resolveSafeRelative,
 } from './paths.mjs';
@@ -25,7 +26,7 @@ import {
 export class AKUFileStore {
     constructor(options = {}) {
         this.rootDir = resolveRootDir(options.rootDir);
-        this.akuRoot = resolveAkuRoot(this.rootDir);
+        this.akuRoot = resolvePersistenceRoot(options.persistenceRoot, this.rootDir);
         this.allowSensitivePaths = Boolean(options.allowSensitivePaths);
     }
 
@@ -48,8 +49,15 @@ export class AKUFileStore {
     }
 
     async exists() {
+        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.assertOwnedPath(this.rootFile(ROOT_FILES.aku));
         try {
             const stat = await fs.lstat(this.rootFile(ROOT_FILES.aku));
+            if (stat.isSymbolicLink()) {
+                throw new AKUError(AKU_ERROR_CODES.AKU_PATH_ESCAPE, 'AKU metadata must not be a symbolic link', {
+                    path: this.rootFile(ROOT_FILES.aku),
+                });
+            }
             return stat.isFile();
         } catch (error) {
             if (error?.code === 'ENOENT') {
@@ -60,14 +68,22 @@ export class AKUFileStore {
     }
 
     async ensureBaseLayout() {
+        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
         await fs.mkdir(this.akuRoot, { recursive: true });
-        await assertNoSymlinkInExistingPath(this.akuRoot, this.rootDir);
-        await fs.mkdir(path.join(this.akuRoot, PENDING_DIRNAME), { recursive: true });
-        await fs.mkdir(this.kuRoot(), { recursive: true });
+        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        const pendingDir = await this.assertOwnedPath(path.join(this.akuRoot, PENDING_DIRNAME));
+        const kusDir = await this.assertOwnedPath(this.kuRoot());
+        await fs.mkdir(pendingDir, { recursive: true });
+        await fs.mkdir(kusDir, { recursive: true });
+        await this.assertOwnedPath(pendingDir);
+        await this.assertOwnedPath(kusDir);
     }
 
     async ensureKULayout(kuId) {
+        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.assertOwnedPath(this.kuRoot());
         const kuDir = this.kuDir(kuId);
+        await this.assertOwnedPath(kuDir);
         await fs.mkdir(kuDir, { recursive: true });
         for (const dir of KU_DIRECTORIES) {
             await fs.mkdir(path.join(kuDir, dir), { recursive: true });
@@ -76,6 +92,8 @@ export class AKUFileStore {
     }
 
     async readText(filePath, options = {}) {
+        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.assertOwnedPath(filePath);
         await assertNoSymlinkInExistingPath(filePath, options.root ?? this.akuRoot);
         try {
             return await fs.readFile(filePath, 'utf8');
@@ -131,6 +149,8 @@ export class AKUFileStore {
     }
 
     async scanKUFolders() {
+        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.assertOwnedPath(this.kuRoot());
         try {
             const entries = await fs.readdir(this.kuRoot(), { withFileTypes: true });
             return entries
@@ -171,6 +191,8 @@ export class AKUFileStore {
 
     async listPendingTransactions() {
         const pendingDir = path.join(this.akuRoot, PENDING_DIRNAME);
+        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.assertOwnedPath(pendingDir);
         try {
             const entries = await fs.readdir(pendingDir, { withFileTypes: true });
             return entries
@@ -261,6 +283,22 @@ export class AKUFileStore {
             info.records = parseJsonl(content, filePath).length;
         }
         return info;
+    }
+
+    async assertOwnedPath(filePath) {
+        return assertSafePersistencePath(this.akuRoot, filePath);
+    }
+
+    async statOwned(filePath) {
+        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.assertOwnedPath(filePath);
+        return fs.stat(filePath);
+    }
+
+    async removeOwned(filePath, options = {}) {
+        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.assertOwnedPath(filePath);
+        return fs.rm(filePath, options);
     }
 
     async aggregateFileInfos() {
