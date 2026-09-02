@@ -2,9 +2,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
-const testsRoot = process.cwd();
+const testsRoot = path.dirname(fileURLToPath(import.meta.url));
 const results = [];
 
 async function listTestFiles(dir) {
@@ -39,7 +40,7 @@ const testFiles = await listTestFiles(testsRoot);
 for (const filePath of testFiles) {
   const relativePath = path.relative(testsRoot, filePath).replace(/\\/g, '/');
   try {
-    const { stdout } = await execFileAsync('node', [filePath], { cwd: testsRoot, maxBuffer: 10 * 1024 * 1024 });
+    const { stdout } = await execFileAsync(process.execPath, [filePath], { cwd: testsRoot, maxBuffer: 10 * 1024 * 1024 });
     let parsed = null;
     try {
       parsed = JSON.parse(stdout);
@@ -82,3 +83,4 @@ for (const filePath of testFiles) {
 }
 
 process.stdout.write(JSON.stringify({ failedTests: results }));
+process.exitCode = results.length === 0 ? 0 : 1;

@@ -20,6 +20,8 @@ import {
 } from '../src/tskill.generated.mjs';
 
 const results = [];
+const nameValidationError = 'Must be between 2 and 200 characters. Cannot contain only numbers or special characters.';
+const emailValidationError = 'Must be a valid email format matching pattern: /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/';
 const addResult = (expected, actual) => {
   const pass = isDeepStrictEqual(actual, expected);
   results.push({ expected, actual, pass });
@@ -31,7 +33,8 @@ addResult(
   JSON.parse(validator_customer_id(null, {}))
 );
 addResult(
-  { field: 'customer_id', error: 'customer_id is required', value: undefined },
+  // The specified JSON serialization omits properties whose value is undefined.
+  { field: 'customer_id', error: 'customer_id is required' },
   JSON.parse(validator_customer_id(undefined, {}))
 );
 addResult(
@@ -58,18 +61,18 @@ addResult(
 );
 // length boundaries
 addResult(
-  { field: 'name', error: 'name must be between 2 and 200 characters', value: 'A' },
+  { field: 'name', error: nameValidationError, value: 'A' },
   JSON.parse(validator_name('A', {}))
 );
 addResult('', validator_name('Ab', {}));
 addResult('', validator_name('A'.repeat(200), {}));
 addResult(
-  { field: 'name', error: 'name must be between 2 and 200 characters', value: 'A'.repeat(201) },
+  { field: 'name', error: nameValidationError, value: 'A'.repeat(201) },
   JSON.parse(validator_name('A'.repeat(201), {}))
 );
 // alphabetic requirement
 addResult(
-  { field: 'name', error: 'name must contain alphabetic characters', value: '1234' },
+  { field: 'name', error: nameValidationError, value: '1234' },
   JSON.parse(validator_name('1234', {}))
 );
 
@@ -80,15 +83,15 @@ addResult(
 );
 addResult('', validator_email('Test@Example.com', {}));
 addResult(
-  { field: 'email', error: 'email must be a valid email address', value: 'testexample.com' },
+  { field: 'email', error: emailValidationError, value: 'testexample.com' },
   JSON.parse(validator_email('testexample.com', {}))
 );
 addResult(
-  { field: 'email', error: 'email must be a valid email address', value: 'a@b' },
+  { field: 'email', error: emailValidationError, value: 'a@b' },
   JSON.parse(validator_email('a@b', {}))
 );
 addResult(
-  { field: 'email', error: 'email must be a valid email address', value: 'a@b com' },
+  { field: 'email', error: emailValidationError, value: 'a@b com' },
   JSON.parse(validator_email('a@b com', {}))
 );
 
@@ -99,7 +102,7 @@ addResult(
 );
 addResult('', validator_status(' Active ', {}));
 addResult(
-  { field: 'status', error: 'status must be one of: active, inactive, pending, suspended', value: 'enabled' },
+  { field: 'status', error: 'Must be one of: active, inactive, pending, suspended', value: 'enabled' },
   JSON.parse(validator_status('enabled', {}))
 );
 
@@ -155,7 +158,7 @@ addResult(
   prepared
 );
 const preparedPartial = await prepareRecord({ email: 'A@B.COM', other: 'x' });
-addResult('test@b.com', preparedPartial.email);
+addResult('a@b.com', preparedPartial.email);
 addResult('x', preparedPartial.other);
 addResult(' ()', preparedPartial.display_name);
 
@@ -179,3 +182,4 @@ addResult({ name: 'John', email: '—', other: 'x' }, presented);
 addResult(false, 'status' in presented);
 
 process.stdout.write(JSON.stringify({ results }));
+process.exitCode = results.every((entry) => entry.pass === true) ? 0 : 1;
