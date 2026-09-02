@@ -176,7 +176,7 @@ describe('MainAgent logger propagation', () => {
         const { getDebugLogger } = await import('../../utils/DebugLogger.mjs');
 
         const agent = new MainAgent({
-            startDir: process.cwd(),
+            startDir: TEMP_ROOT,
             disableInternalSkills: true,
         });
 
@@ -196,7 +196,7 @@ describe('MainAgent logger propagation', () => {
         };
 
         const agent = new MainAgent({
-            startDir: process.cwd(),
+            startDir: TEMP_ROOT,
             logger: customLogger,
             disableInternalSkills: true,
         });
@@ -217,7 +217,7 @@ describe('MainAgent logger propagation', () => {
         };
 
         const agent = new MainAgent({
-            startDir: process.cwd(),
+            startDir: TEMP_ROOT,
             logger: customLogger,
             disableInternalSkills: true,
         });
@@ -238,7 +238,7 @@ describe('MainAgent logger propagation', () => {
         };
 
         const agent = new MainAgent({
-            startDir: process.cwd(),
+            startDir: TEMP_ROOT,
             logger: customLogger,
             disableInternalSkills: true,
         });
@@ -259,7 +259,7 @@ describe('MainAgent logger propagation', () => {
         };
 
         const agent = new MainAgent({
-            startDir: process.cwd(),
+            startDir: TEMP_ROOT,
             logger: customLogger,
             disableInternalSkills: true,
         });
@@ -299,7 +299,7 @@ describe('Custom logger override — end-to-end', () => {
         };
 
         const agent = new MainAgent({
-            startDir: process.cwd(),
+            startDir: TEMP_ROOT,
             logger: customLogger,
             disableInternalSkills: true,
         });
@@ -320,7 +320,7 @@ describe('Custom logger override — end-to-end', () => {
         const { getDebugLogger } = await import('../../utils/DebugLogger.mjs');
 
         const agent = new MainAgent({
-            startDir: process.cwd(),
+            startDir: TEMP_ROOT,
             disableInternalSkills: true,
         });
 

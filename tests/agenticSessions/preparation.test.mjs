@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { LoopAgentSession } from '../../LLMAgents/LoopAgenticSession/LoopAgentSession.mjs';
 import { buildPreparationPrompt as buildLoopPreparationPrompt } from '../../LLMAgents/LoopAgenticSession/prompts.mjs';
@@ -923,13 +926,16 @@ test('OrchestratorSkillsSubsystem passes current SOP session snapshot to nested 
     assert.equal(capturedOptions.context.workingDir, '/workspace/project');
 });
 
-test('MainAgent passes loop conversation snapshot as skill parentContext', async () => {
+test('MainAgent passes loop conversation snapshot as skill parentContext', async (t) => {
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'main-agent-parent-context-'));
+    t.after(() => fs.rmSync(projectRoot, { recursive: true, force: true }));
     let capturedOptions = null;
     const mainAgent = new MainAgent({
-        startDir: process.cwd(),
+        startDir: projectRoot,
         disableInternalSkills: true,
         logger: { debug: () => {}, log: () => {} },
     });
+    t.after(() => mainAgent.shutdown());
     const skillRecord = {
         name: 'skills-orchestrator',
         shortName: 'skills-orchestrator',

@@ -358,6 +358,7 @@ test('refresh fails closed when the signed artifact changes', (t) => {
 test('fixture location is the shared producer-consumer source of truth', () => {
     assert.equal(
         GENERATED_LOCAL_FIXTURE_DIR,
-        '/Users/danielsava/work/file-parser/ploinky/tests/fixtures/router-descriptor'
+        path.resolve(String(process.env.PLOINKY_TEST_ROUTER_FIXTURE_DIR || '').trim()
+            || path.resolve(import.meta.dirname, '../../../tests/fixtures/router-descriptor'))
     );
 });

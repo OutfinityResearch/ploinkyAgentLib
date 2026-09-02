@@ -14,6 +14,7 @@ import {
     __resetCallLLMWithModelForTests,
 } from '../utils/LLMClient.mjs';
 import { registerProvider, resetProviders } from '../utils/LLMProviders/providerRegistry.mjs';
+import { fixturePath } from './helpers/generatedLocalFixture.mjs';
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -256,12 +257,11 @@ describe('callSearch error handling', () => {
 
 test('real generated-local callSearch composition uses a provider qualifier and preserves the wire model', () => {
     const packageRoot = path.resolve(import.meta.dirname, '..');
-    const fixtureRoot = path.resolve(import.meta.dirname, '../../../tests/fixtures/router-descriptor');
     const fixtureEnv = JSON.parse(readFileSync(
-        path.join(fixtureRoot, 'public-environment.json'),
+        fixturePath('public-environment.json'),
         'utf8',
     ));
-    fixtureEnv.PLOINKY_ROUTER_DESCRIPTOR_FILE = path.join(fixtureRoot, 'public-envelope.json');
+    fixtureEnv.PLOINKY_ROUTER_DESCRIPTOR_FILE = fixturePath();
     fixtureEnv.ACHILLES_ENV_START_DIR = '/';
     const transportModuleUrl = pathToFileURL(path.join(
         packageRoot,

@@ -56,8 +56,11 @@ export class MainAgent {
         modelConfig = null,
         reasoningEffort = null,
         disableInternalSkills = true,
+        additionalWorkspaceRoots = [],
     } = {}) {
         this.startDir = startDir;
+        this.additionalWorkspaceRoots = additionalWorkspaceRoots;
+        this._workspaceSkillRoots = [startDir];
         this.logger = logger || getDebugLogger();
         this.disableInternalSkills = Boolean(disableInternalSkills);
         this.reasoningEffort = reasoningEffort || null;
@@ -96,9 +99,8 @@ export class MainAgent {
 
         this.logger.debug(`MainAgent:internalSkills: disabled=${this.disableInternalSkills}, found ${internalSkills.length} skills: ${joinSkillNames(internalSkills)}`);
 
-        const userSkills = discoverSkills(this.startDir, {
-            logger: this.logger,
-        });
+        const { roots, skills: userSkills } = this._discoverWorkspaceSkills();
+        this._workspaceSkillRoots = roots;
 
         for (const record of userSkills) {
             record.isInternal = false;
@@ -109,6 +111,23 @@ export class MainAgent {
 
         this._refreshOrchestratedSkillIndex();
         this.debugSkillRegistrationSummary({ phase: 'constructor' });
+    }
+
+    _discoverWorkspaceSkills() {
+        const additionalRoots = typeof this.additionalWorkspaceRoots === 'function'
+            ? this.additionalWorkspaceRoots()
+            : this.additionalWorkspaceRoots;
+        if (!Array.isArray(additionalRoots) || additionalRoots.some(root => typeof root !== 'string' || !root)) {
+            throw new TypeError('additionalWorkspaceRoots must provide an array of non-empty directory paths.');
+        }
+        const roots = [...new Set([this.startDir, ...additionalRoots].map(root => path.resolve(root)))];
+        const records = new Map();
+        for (const root of roots) {
+            for (const record of discoverSkills(root, { logger: this.logger })) {
+                if (!records.has(record.filePath)) records.set(record.filePath, record);
+            }
+        }
+        return { roots, skills: [...records.values()] };
     }
 
     debugSkillRegistrationSummary(context = {}) {
@@ -370,9 +389,7 @@ export class MainAgent {
         const beforeWorkspaceSkills = beforeSkills.filter((skill) => this._isWorkspaceSkillRecord(skill));
         const beforeWorkspaceNames = new Set(beforeWorkspaceSkills.map((skill) => skill.name));
         const preservedSkills = beforeSkills.filter((skill) => !this._isWorkspaceSkillRecord(skill));
-        const workspaceSkills = discoverSkills(this.startDir, {
-            logger: this.logger,
-        });
+        const { roots, skills: workspaceSkills } = this._discoverWorkspaceSkills();
 
         for (const record of workspaceSkills) {
             record.isInternal = false;
@@ -403,6 +420,7 @@ export class MainAgent {
             this._registerSkill(record);
         }
 
+        this._workspaceSkillRoots = roots;
         this._refreshOrchestratedSkillIndex();
 
         const summary = {
@@ -419,7 +437,8 @@ export class MainAgent {
     }
 
     _isWorkspaceSkillRecord(skillRecord) {
-        return Boolean(skillRecord?.skillDir && !skillRecord.isInternal && isPathInside(skillRecord.skillDir, this.startDir));
+        return Boolean(skillRecord?.skillDir && !skillRecord.isInternal
+            && this._workspaceSkillRoots.some(root => isPathInside(skillRecord.skillDir, root)));
     }
 
     _refreshCurrentSessionTools(summary = {}) {

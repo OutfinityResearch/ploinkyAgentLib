@@ -44,6 +44,7 @@ export class AgenticKnowledgeUnits {
         this.tokenizer = new AKUTokenizer();
         this.lockManager = new AKULockManager({
             akuRoot: this.store.akuRoot,
+            pathGuard: this.store.pathGuard,
             actor: this.actor,
             clock: this.clock,
             timeoutMs: options.lockTimeoutMs,
@@ -52,6 +53,7 @@ export class AgenticKnowledgeUnits {
         });
         this.writer = new AtomicFileWriter({
             akuRoot: this.store.akuRoot,
+            pathGuard: this.store.pathGuard,
             actor: this.actor,
             clock: this.clock,
             strictFsync: options.strictFsync,

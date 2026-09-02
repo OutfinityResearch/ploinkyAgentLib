@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { AKU_DIRNAME, SENSITIVE_PATH_PARTS } from './constants.mjs';
 import { AKU_ERROR_CODES, AKUError } from './errors.mjs';
@@ -23,6 +24,48 @@ export function resolvePersistenceRoot(persistenceRoot, rootDir = process.cwd())
         );
     }
     return path.resolve(persistenceRoot);
+}
+
+export function createPersistencePathGuard(persistenceRoot, projectRoot = persistenceRoot) {
+    const root = path.resolve(persistenceRoot);
+    const expectedRealRoot = projectExistingPath(root);
+    const assertRoot = async () => {
+        await assertSafePersistenceRoot(root, projectRoot);
+        if (projectExistingPath(root) !== expectedRealRoot) {
+            throw new AKUError(AKU_ERROR_CODES.AKU_PATH_ESCAPE, 'AKU persistence root changed its canonical location', {
+                path: root,
+            });
+        }
+        return root;
+    };
+    return {
+        assertRoot,
+        async assertPath(targetPath) {
+            await assertRoot();
+            return assertSafePersistencePath(root, targetPath);
+        },
+    };
+}
+
+function projectExistingPath(targetPath) {
+    let cursor = path.resolve(targetPath);
+    const missing = [];
+    while (true) {
+        try {
+            return path.join(realpathSync(cursor), ...missing);
+        } catch (error) {
+            if (error?.code === 'ELOOP' || error?.code === 'ENOTDIR') {
+                throw new AKUError(AKU_ERROR_CODES.AKU_PATH_ESCAPE, 'AKU persistence path is unsafe', {
+                    path: targetPath,
+                });
+            }
+            if (error?.code !== 'ENOENT') throw error;
+            const parent = path.dirname(cursor);
+            if (parent === cursor) throw error;
+            missing.unshift(path.basename(cursor));
+            cursor = parent;
+        }
+    }
 }
 
 export async function assertSafePersistenceRoot(persistenceRoot, projectRoot) {

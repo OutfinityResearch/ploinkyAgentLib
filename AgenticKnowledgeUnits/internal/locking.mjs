@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { KUS_DIRNAME, LOCK_DEFAULTS, RETRY_DEFAULTS, ROOT_LOCK_NAME } from './constants.mjs';
 import { AKU_ERROR_CODES, AKUError } from './errors.mjs';
-import { assertSafePersistencePath } from './paths.mjs';
+import { createPersistencePathGuard } from './paths.mjs';
 import { isoNow, validateKuId } from './schemas.mjs';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -11,6 +11,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 export class AKULockManager {
     constructor(options = {}) {
         this.akuRoot = options.akuRoot;
+        this.pathGuard = options.pathGuard ?? createPersistencePathGuard(this.akuRoot);
         this.actor = options.actor ?? 'unknown';
         this.clock = options.clock ?? (() => new Date());
         this.timeoutMs = options.timeoutMs ?? LOCK_DEFAULTS.timeoutMs;
@@ -38,9 +39,9 @@ export class AKULockManager {
 
         while (true) {
             try {
-                await assertSafePersistencePath(this.akuRoot, lockPath);
+                await this.pathGuard.assertPath(lockPath);
                 await fs.mkdir(lockPath);
-                await assertSafePersistencePath(this.akuRoot, lockPath);
+                await this.pathGuard.assertPath(lockPath);
                 const lock = {
                     scope,
                     kuId: options.kuId ?? null,
@@ -91,8 +92,8 @@ export class AKULockManager {
 
     async writeMetadata(lock) {
         const metadataPath = path.join(lock.path, 'metadata.json');
-        await assertSafePersistencePath(this.akuRoot, lock.path);
-        await assertSafePersistencePath(this.akuRoot, metadataPath);
+        await this.pathGuard.assertPath(lock.path);
+        await this.pathGuard.assertPath(metadataPath);
         const metadata = {
             owner: lock.owner,
             pid: lock.pid,
@@ -139,10 +140,10 @@ export class AKULockManager {
 
     async isStale(lockPath, staleMs = this.staleMs) {
         try {
-            await assertSafePersistencePath(this.akuRoot, lockPath);
+            await this.pathGuard.assertPath(lockPath);
             const stat = await fs.stat(lockPath);
             const mtimeAge = Date.now() - stat.mtimeMs;
-            const metadata = await readMetadata(lockPath, this.akuRoot);
+            const metadata = await readMetadata(lockPath, this.akuRoot, this.pathGuard);
             const refreshed = metadata?.refreshed_at ? Date.parse(metadata.refreshed_at) : stat.mtimeMs;
             const metadataAge = Date.now() - refreshed;
             return mtimeAge > staleMs && metadataAge > staleMs;
@@ -157,16 +158,17 @@ export class AKULockManager {
 
     async removeLockDirectory(lockPath) {
         await retryFsOperation(async () => {
-            await assertSafePersistencePath(this.akuRoot, lockPath);
+            await this.pathGuard.assertPath(lockPath);
             await fs.rm(lockPath, { recursive: true, force: true });
         });
     }
 }
 
-export async function readMetadata(lockPath, akuRoot = path.dirname(lockPath)) {
+export async function readMetadata(lockPath, akuRoot = path.dirname(lockPath), pathGuard = null) {
     try {
-        await assertSafePersistencePath(akuRoot, lockPath);
-        await assertSafePersistencePath(akuRoot, path.join(lockPath, 'metadata.json'));
+        const guard = pathGuard ?? createPersistencePathGuard(akuRoot);
+        await guard.assertPath(lockPath);
+        await guard.assertPath(path.join(lockPath, 'metadata.json'));
         const text = await fs.readFile(path.join(lockPath, 'metadata.json'), 'utf8');
         return JSON.parse(text);
     } catch (error) {

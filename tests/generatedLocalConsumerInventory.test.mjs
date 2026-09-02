@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fixturePath } from './helpers/generatedLocalFixture.mjs';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXCLUDED_DIRECTORIES = new Set([
@@ -266,12 +267,11 @@ test('showActiveModels reports branded availability without a dynamic credential
 });
 
 test('private-brand availability performs zero generated credential getter calls', () => {
-    const fixtureRoot = path.resolve(PACKAGE_ROOT, '../../tests/fixtures/router-descriptor');
     const fixtureEnv = JSON.parse(fs.readFileSync(
-        path.join(fixtureRoot, 'public-environment.json'),
+        fixturePath('public-environment.json'),
         'utf8',
     ));
-    fixtureEnv.PLOINKY_ROUTER_DESCRIPTOR_FILE = path.join(fixtureRoot, 'public-envelope.json');
+    fixtureEnv.PLOINKY_ROUTER_DESCRIPTOR_FILE = fixturePath();
     const descriptorModuleUrl = pathToFileURL(path.join(
         PACKAGE_ROOT,
         'utils/LLMProviders/transport/generatedLocalRouterDescriptor.mjs',
@@ -313,12 +313,11 @@ test('private-brand availability performs zero generated credential getter calls
 });
 
 test('showActiveModels performs only certified discovery key reads and no diagnostic read', () => {
-    const fixtureRoot = path.resolve(PACKAGE_ROOT, '../../tests/fixtures/router-descriptor');
     const fixtureEnv = JSON.parse(fs.readFileSync(
-        path.join(fixtureRoot, 'public-environment.json'),
+        fixturePath('public-environment.json'),
         'utf8',
     ));
-    fixtureEnv.PLOINKY_ROUTER_DESCRIPTOR_FILE = path.join(fixtureRoot, 'public-envelope.json');
+    fixtureEnv.PLOINKY_ROUTER_DESCRIPTOR_FILE = fixturePath();
     fixtureEnv.ACHILLES_ENV_START_DIR = '/';
     const transportModuleUrl = pathToFileURL(path.join(
         PACKAGE_ROOT,

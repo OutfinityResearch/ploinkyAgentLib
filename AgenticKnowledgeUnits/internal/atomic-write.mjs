@@ -4,12 +4,13 @@ import { randomBytes } from 'node:crypto';
 import { PENDING_DIRNAME } from './constants.mjs';
 import { AKUError } from './errors.mjs';
 import { retryFsOperation } from './locking.mjs';
-import { assertSafePersistencePath } from './paths.mjs';
+import { createPersistencePathGuard } from './paths.mjs';
 import { isoNow } from './schemas.mjs';
 
 export class AtomicFileWriter {
     constructor(options = {}) {
         this.akuRoot = options.akuRoot;
+        this.pathGuard = options.pathGuard ?? createPersistencePathGuard(this.akuRoot);
         this.actor = options.actor ?? 'unknown';
         this.clock = options.clock ?? (() => new Date());
         this.strictFsync = Boolean(options.strictFsync);
@@ -19,9 +20,9 @@ export class AtomicFileWriter {
         const txnId = `txn_${Date.now()}_${randomBytes(4).toString('hex')}`;
         const pendingDir = path.join(this.akuRoot, PENDING_DIRNAME);
         const pendingPath = path.join(pendingDir, `${txnId}.json`);
-        await assertSafePersistencePath(this.akuRoot, pendingDir);
+        await this.pathGuard.assertPath(pendingDir);
         await fs.mkdir(pendingDir, { recursive: true });
-        await assertSafePersistencePath(this.akuRoot, pendingDir);
+        await this.pathGuard.assertPath(pendingDir);
         await this.writePendingMarker(pendingPath, label, txnId);
         let completed = false;
         const api = {
@@ -38,7 +39,7 @@ export class AtomicFileWriter {
             const result = await callback(api);
             completed = true;
             await retryFsOperation(async () => {
-                await assertSafePersistencePath(this.akuRoot, pendingPath);
+                await this.pathGuard.assertPath(pendingPath);
                 await fs.unlink(pendingPath);
             });
             return result;
@@ -57,7 +58,7 @@ export class AtomicFileWriter {
             pid: process.pid,
             created_at: isoNow(this.clock),
         };
-        await assertSafePersistencePath(this.akuRoot, pendingPath);
+        await this.pathGuard.assertPath(pendingPath);
         const handle = await fs.open(pendingPath, 'wx');
         try {
             await handle.writeFile(`${JSON.stringify(marker, null, 2)}\n`, 'utf8');
@@ -69,15 +70,15 @@ export class AtomicFileWriter {
     }
 
     async replaceFile(targetPath, content, txnId = 'txn') {
-        await assertSafePersistencePath(this.akuRoot, targetPath);
-        await assertSafePersistencePath(this.akuRoot, path.dirname(targetPath));
+        await this.pathGuard.assertPath(targetPath);
+        await this.pathGuard.assertPath(path.dirname(targetPath));
         await fs.mkdir(path.dirname(targetPath), { recursive: true });
-        await assertSafePersistencePath(this.akuRoot, path.dirname(targetPath));
+        await this.pathGuard.assertPath(path.dirname(targetPath));
         const tempPath = path.join(
             path.dirname(targetPath),
             `.${path.basename(targetPath)}.${txnId}.${randomBytes(4).toString('hex')}.tmp`,
         );
-        await assertSafePersistencePath(this.akuRoot, tempPath);
+        await this.pathGuard.assertPath(tempPath);
         const handle = await fs.open(tempPath, 'wx');
         try {
             await handle.writeFile(content, 'utf8');
@@ -86,8 +87,8 @@ export class AtomicFileWriter {
             await handle.close();
         }
         await retryFsOperation(async () => {
-            await assertSafePersistencePath(this.akuRoot, tempPath);
-            await assertSafePersistencePath(this.akuRoot, targetPath);
+            await this.pathGuard.assertPath(tempPath);
+            await this.pathGuard.assertPath(targetPath);
             await fs.rename(tempPath, targetPath);
         });
         await this.syncParentDirectory(path.dirname(targetPath));
@@ -106,7 +107,7 @@ export class AtomicFileWriter {
     async syncParentDirectory(directoryPath) {
         let handle;
         try {
-            await assertSafePersistencePath(this.akuRoot, directoryPath);
+            await this.pathGuard.assertPath(directoryPath);
             handle = await fs.open(directoryPath, 'r');
             await handle.sync();
         } catch (error) {

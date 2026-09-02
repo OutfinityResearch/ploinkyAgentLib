@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { DBTableSkillsSubsystem } from '../../DBTableSkillsSubsystem/DBTableSkillsSubsystem.mjs';
@@ -9,8 +10,14 @@ import { parseSkillMarkdown, validateSkill } from '../../DBTableSkillsSubsystem/
 import { LLMAgent } from '../../LLMAgents/index.mjs';
 import { MainAgent } from '../../MainAgent/index.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const fixtureSourceRoot = path.dirname(fileURLToPath(import.meta.url));
+const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dbtable-integration-'));
+fs.cpSync(path.join(fixtureSourceRoot, 'skills'), path.join(fixtureRoot, 'skills'), { recursive: true });
+// Exercise the checked-in generated fixture independently of checkout timestamps.
+const cachedCodeTime = new Date(Date.now() + 1000);
+fs.utimesSync(path.join(fixtureRoot, 'skills', 'customers', 'src', 'tskill.generated.mjs'),
+    cachedCodeTime, cachedCodeTime);
+test.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
 
 // Mock LLM Agent for deterministic testing
 class MockLLMAgent {
@@ -23,8 +30,12 @@ class MockLLMAgent {
         this.callLog.push({ prompt, options });
 
         if (options.responseShape === 'json') {
+            const userInput = prompt.match(/^Analyze this prompt[^\n]*\n"([^\n]*)"/)?.[1]
+                ?? prompt.match(/User said: "([^\n]*)"/)?.[1]
+                ?? prompt;
+            const normalizedInput = userInput.toLowerCase();
             // Mock JSON responses for operation detection
-            if (prompt.toLowerCase().includes('show all') || prompt.toLowerCase().includes('list')) {
+            if (normalizedInput.includes('show all') || normalizedInput.includes('list')) {
                 return {
                     operation: 'SELECT',
                     intent: 'Get all customers',
@@ -32,7 +43,7 @@ class MockLLMAgent {
                     data: null
                 };
             }
-            if (prompt.toLowerCase().includes('create') || prompt.toLowerCase().includes('add new')) {
+            if (/^(create|add)\b/.test(normalizedInput)) {
                 return {
                     operation: 'CREATE',
                     intent: 'Create new customer',
@@ -40,7 +51,7 @@ class MockLLMAgent {
                     data: { name: 'John Doe', email: 'john@example.com', status: 'pending' }
                 };
             }
-            if (prompt.toLowerCase().includes('update') || prompt.toLowerCase().includes('modify')) {
+            if (normalizedInput.includes('update') || normalizedInput.includes('modify')) {
                 return {
                     operation: 'UPDATE',
                     intent: 'Update customer',
@@ -48,7 +59,7 @@ class MockLLMAgent {
                     data: { status: 'active' }
                 };
             }
-            if (prompt.toLowerCase().includes('delete') || prompt.toLowerCase().includes('remove')) {
+            if (normalizedInput.includes('delete') || normalizedInput.includes('remove')) {
                 return {
                     operation: 'DELETE',
                     intent: 'Delete customer',
@@ -149,7 +160,7 @@ async function initializeShared() {
 // ============================================================================
 
 test('SkillParser: Parse tskill.md file structure', async (t) => {
-    const tskillPath = path.join(__dirname, 'skills', 'customers', 'tskill.md');
+    const tskillPath = path.join(fixtureRoot, 'skills', 'customers', 'tskill.md');
     const content = await fs.promises.readFile(tskillPath, 'utf-8');
 
     const parsed = parseSkillMarkdown(content);
@@ -160,7 +171,7 @@ test('SkillParser: Parse tskill.md file structure', async (t) => {
 });
 
 test('SkillParser: Extract field definitions correctly', async (t) => {
-    const tskillPath = path.join(__dirname, 'skills', 'customers', 'tskill.md');
+    const tskillPath = path.join(fixtureRoot, 'skills', 'customers', 'tskill.md');
     const content = await fs.promises.readFile(tskillPath, 'utf-8');
 
     const parsed = parseSkillMarkdown(content);
@@ -191,7 +202,7 @@ test('SkillParser: Extract field definitions correctly', async (t) => {
 });
 
 test('SkillParser: Identify derived fields', async (t) => {
-    const tskillPath = path.join(__dirname, 'skills', 'customers', 'tskill.md');
+    const tskillPath = path.join(fixtureRoot, 'skills', 'customers', 'tskill.md');
     const content = await fs.promises.readFile(tskillPath, 'utf-8');
 
     const parsed = parseSkillMarkdown(content);
@@ -203,7 +214,7 @@ test('SkillParser: Identify derived fields', async (t) => {
 });
 
 test('SkillParser: Parse business rules', async (t) => {
-    const tskillPath = path.join(__dirname, 'skills', 'customers', 'tskill.md');
+    const tskillPath = path.join(fixtureRoot, 'skills', 'customers', 'tskill.md');
     const content = await fs.promises.readFile(tskillPath, 'utf-8');
 
     const parsed = parseSkillMarkdown(content);
@@ -214,7 +225,7 @@ test('SkillParser: Parse business rules', async (t) => {
 });
 
 test('SkillParser: Validate skill structure', async (t) => {
-    const tskillPath = path.join(__dirname, 'skills', 'customers', 'tskill.md');
+    const tskillPath = path.join(fixtureRoot, 'skills', 'customers', 'tskill.md');
     const content = await fs.promises.readFile(tskillPath, 'utf-8');
 
     const parsed = parseSkillMarkdown(content);
@@ -270,8 +281,8 @@ dbAdapter: mockDB
             rawContent: 'Manage customer records',
             sections: {}
         },
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md')
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md')
     };
 
     await subsystem.prepareSkill(skillRecord);
@@ -317,8 +328,8 @@ dbAdapter: mockDB
             rawContent: 'Manage customer records',
             sections: {}
         },
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md')
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md')
     };
 
     await subsystem.prepareSkill(skillRecord);
@@ -363,8 +374,8 @@ dbAdapter: mockDB
             rawContent: 'Manage customer records',
             sections: {}
         },
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md')
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md')
     };
 
     await subsystem.prepareSkill(skillRecord);
@@ -409,8 +420,8 @@ dbAdapter: mockDB
             rawContent: 'Manage customer records',
             sections: {}
         },
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md')
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md')
     };
 
     await subsystem.prepareSkill(skillRecord);
@@ -432,7 +443,7 @@ test('MainAgent: Extend to support dbtable skill type', async (t) => {
     await initializeShared();
 
     const mainAgent = new MainAgent({
-        startDir: __dirname,
+        startDir: fixtureRoot,
     });
 
     // Manually add DBTable subsystem support
@@ -452,7 +463,7 @@ test('MainAgent: Register tskill.md skill manually', async (t) => {
     await initializeShared();
 
     const mainAgent = new MainAgent({
-        startDir: __dirname,
+        startDir: fixtureRoot,
     });
 
     // Add DBTable subsystem
@@ -472,8 +483,8 @@ dbAdapter: shared.dbAdapter
             rawContent: 'Manage customer records',
             sections: {}
         },
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md'),
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md'),
         shortName: 'customers',
         preparedConfig: null
     };
@@ -510,7 +521,7 @@ test('E2E: Full workflow from skill discovery to execution', async (t) => {
     // This test demonstrates what SHOULD work once tskill.md support is added
 
     const mainAgent = new MainAgent({
-        startDir: __dirname,
+        startDir: fixtureRoot,
     });
 
     // Add DBTable subsystem
@@ -523,7 +534,7 @@ dbAdapter: shared.dbAdapter
     // Debug: Check what skills were registered
     console.log('Registered skills:', Array.from(mainAgent._skills.keys()));
     console.log('Skill aliases:', Array.from(mainAgent._skillAliases.keys()));
-    console.log('startDir:', __dirname);
+    console.log('startDir:', fixtureRoot);
 
     // If no skills, skip the test
     if (mainAgent._skills.size === 0) {
@@ -557,8 +568,8 @@ dbAdapter: mockDB
         name: 'customers-dbtable',
         type: 'dbtable',
         descriptor: {},
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md')
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md')
     };
 
     await subsystem.prepareSkill(skillRecord);
@@ -615,8 +626,8 @@ dbAdapter: mockDB
         name: 'customers-dbtable',
         type: 'dbtable',
         descriptor: {},
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md')
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md')
     };
 
     await subsystem.prepareSkill(skillRecord);
@@ -671,8 +682,8 @@ dbAdapter: mockDB
         name: 'customers-dbtable',
         type: 'dbtable',
         descriptor: {},
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md')
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md')
     };
 
     await subsystem.prepareSkill(skillRecord);
@@ -809,8 +820,8 @@ dbAdapter: mockDB
         name: 'customers-dbtable',
         type: 'dbtable',
         descriptor: {},
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md')
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md')
     };
 
     await subsystem.prepareSkill(skillRecord);
@@ -850,7 +861,7 @@ test('E2E: Mock-based full workflow (works now)', async (t) => {
     const mockDB = new MockDBAdapter();
 
     const mainAgent = new MainAgent({
-        startDir: __dirname,
+        startDir: fixtureRoot,
     });
 
     // Add DBTable subsystem
@@ -870,8 +881,8 @@ dbAdapter: mockDB
             rawContent: 'Manage customer records',
             sections: {}
         },
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md'),
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md'),
         shortName: 'customers',
         preparedConfig: null
     };
@@ -914,7 +925,7 @@ test('E2E: Test CREATE operation workflow', async (t) => {
     const mockDB = new MockDBAdapter();
 
     const mainAgent = new MainAgent({
-        startDir: __dirname,
+        startDir: fixtureRoot,
     });
 
     const dbTableSubsystem = new DBTableSkillsSubsystem({
@@ -932,8 +943,8 @@ dbAdapter: mockDB
             rawContent: 'Manage customer records',
             sections: {}
         },
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md'),
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md'),
         shortName: 'customers',
         preparedConfig: null
     };
@@ -964,7 +975,7 @@ test('E2E: Test UPDATE operation workflow', async (t) => {
     const mockDB = new MockDBAdapter();
 
     const mainAgent = new MainAgent({
-        startDir: __dirname,
+        startDir: fixtureRoot,
     });
 
     const dbTableSubsystem = new DBTableSkillsSubsystem({
@@ -982,8 +993,8 @@ dbAdapter: mockDB
             rawContent: 'Manage customer records',
             sections: {}
         },
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md'),
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md'),
         shortName: 'customers',
         preparedConfig: null
     };
@@ -1029,7 +1040,7 @@ test('E2E: Test DELETE operation workflow', async (t) => {
     const mockDB = new MockDBAdapter();
 
     const mainAgent = new MainAgent({
-        startDir: __dirname,
+        startDir: fixtureRoot,
     });
 
     const dbTableSubsystem = new DBTableSkillsSubsystem({
@@ -1047,8 +1058,8 @@ dbAdapter: mockDB
             rawContent: 'Manage customer records',
             sections: {}
         },
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md'),
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md'),
         shortName: 'customers',
         preparedConfig: null
     };
@@ -1140,8 +1151,8 @@ dbAdapter: mockDB
             rawContent: 'Manage customer records',
             sections: {}
         },
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md')
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md')
     };
 
     await subsystem.prepareSkill(skillRecord);
@@ -1171,8 +1182,8 @@ dbAdapter: mockDB
         name: 'unprepared-skill',
         type: 'dbtable',
         descriptor: {},
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md')
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md')
     };
 
     // Don't call prepareSkill
@@ -1201,16 +1212,16 @@ dbAdapter: mockDB
         name: 'customers-dbtable-1',
         type: 'dbtable',
         descriptor: {},
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md')
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md')
     };
 
     const skillRecord2 = {
         name: 'customers-dbtable-2',
         type: 'dbtable',
         descriptor: {},
-        skillDir: path.join(__dirname, 'skills', 'customers'),
-        filePath: path.join(__dirname, 'skills', 'customers', 'tskill.md')
+        skillDir: path.join(fixtureRoot, 'skills', 'customers'),
+        filePath: path.join(fixtureRoot, 'skills', 'customers', 'tskill.md')
     };
 
     await subsystem.prepareSkill(skillRecord1);

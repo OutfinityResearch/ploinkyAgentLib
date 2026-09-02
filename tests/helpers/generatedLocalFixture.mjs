@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const GENERATED_LOCAL_FIXTURE_DIR = path.resolve(
-    __dirname,
-    '../../../../tests/fixtures/router-descriptor'
+    String(process.env.PLOINKY_TEST_ROUTER_FIXTURE_DIR || '').trim()
+        || path.resolve(__dirname, '../../../../tests/fixtures/router-descriptor')
 );
 
 export const GENERATED_LOCAL_FIXTURE_HASHES = Object.freeze({

@@ -13,7 +13,7 @@ summary: Defines MainAgent as the application-facing coordinator for skill disco
 
 Construction must create or accept LLMAgent, establish the effective SecuritySupervisor, create SubsystemFactory, initialize canonical and alias registries, and discover the configured skill roots. MainAgent must remain the sole owner of the top-level catalog even though subsystems prepare and execute individual records.
 
-Workspace skills must be discovered below `startDir`. Package-internal skills must remain excluded unless `disableInternalSkills` is explicitly false. Canonical names and aliases must resolve to one record, and a workspace record must take precedence over an internal record with the same canonical name.
+Workspace skills must be discovered below `startDir` and explicitly supplied `additionalWorkspaceRoots`. The additional roots may be an array of directory paths or a synchronous resolver returning that array; a resolver must run before initial discovery and each refresh so callers can revalidate managed storage. Overlapping roots must not register the same descriptor twice. Additional discovery roots must not change `startDir` or the application's project and sandbox boundaries. Package-internal skills must remain excluded unless `disableInternalSkills` is explicitly false. Canonical names and aliases must resolve to one record, and a workspace record must take precedence over an internal record with the same canonical name.
 
 ### Supervisor Propagation
 
@@ -35,7 +35,7 @@ Initial history may be applied only when the session is created. MainAgent must 
 
 ### Refresh and Enabled State
 
-`refreshSkills()` must preserve non-workspace records and the user's disabled-state intent, rebuild workspace records and aliases, and report added, updated, and removed names. When a reusable session exists, refresh must replace its tool surface without replacing the session object or discarding conversation state.
+`refreshSkills()` must preserve non-workspace records and the user's disabled-state intent, rebuild records and aliases from every configured workspace root, and report added, updated, and removed names. Removed roots must not leave stale records or aliases. A root-resolution failure must leave the existing catalog intact. When a reusable session exists, refresh must replace its tool surface without replacing the session object or discarding conversation state.
 
 `enableSkills()` and `disableSkills()` must validate the entire requested batch before mutating any record. A partially invalid batch must not leave the catalog in a partially changed state.
 

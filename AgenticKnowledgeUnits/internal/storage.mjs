@@ -13,8 +13,7 @@ import { AKU_ERROR_CODES, AKUError } from './errors.mjs';
 import { validateKuId } from './schemas.mjs';
 import {
     assertNoSymlinkInExistingPath,
-    assertSafePersistencePath,
-    assertSafePersistenceRoot,
+    createPersistencePathGuard,
     assertSafeIdSegment,
     normalizeRelativePath,
     projectDisplayPath,
@@ -27,6 +26,7 @@ export class AKUFileStore {
     constructor(options = {}) {
         this.rootDir = resolveRootDir(options.rootDir);
         this.akuRoot = resolvePersistenceRoot(options.persistenceRoot, this.rootDir);
+        this.pathGuard = createPersistencePathGuard(this.akuRoot, this.rootDir);
         this.allowSensitivePaths = Boolean(options.allowSensitivePaths);
     }
 
@@ -49,7 +49,7 @@ export class AKUFileStore {
     }
 
     async exists() {
-        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.pathGuard.assertRoot();
         await this.assertOwnedPath(this.rootFile(ROOT_FILES.aku));
         try {
             const stat = await fs.lstat(this.rootFile(ROOT_FILES.aku));
@@ -68,31 +68,32 @@ export class AKUFileStore {
     }
 
     async ensureBaseLayout() {
-        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.pathGuard.assertRoot();
         await fs.mkdir(this.akuRoot, { recursive: true });
-        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.pathGuard.assertRoot();
         const pendingDir = await this.assertOwnedPath(path.join(this.akuRoot, PENDING_DIRNAME));
-        const kusDir = await this.assertOwnedPath(this.kuRoot());
         await fs.mkdir(pendingDir, { recursive: true });
+        const kusDir = await this.assertOwnedPath(this.kuRoot());
         await fs.mkdir(kusDir, { recursive: true });
         await this.assertOwnedPath(pendingDir);
         await this.assertOwnedPath(kusDir);
     }
 
     async ensureKULayout(kuId) {
-        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.pathGuard.assertRoot();
         await this.assertOwnedPath(this.kuRoot());
         const kuDir = this.kuDir(kuId);
         await this.assertOwnedPath(kuDir);
         await fs.mkdir(kuDir, { recursive: true });
         for (const dir of KU_DIRECTORIES) {
-            await fs.mkdir(path.join(kuDir, dir), { recursive: true });
+            const directory = await this.assertOwnedPath(path.join(kuDir, dir));
+            await fs.mkdir(directory, { recursive: true });
         }
-        await assertNoSymlinkInExistingPath(kuDir, this.akuRoot);
+        await this.assertOwnedPath(kuDir);
     }
 
     async readText(filePath, options = {}) {
-        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.pathGuard.assertRoot();
         await this.assertOwnedPath(filePath);
         await assertNoSymlinkInExistingPath(filePath, options.root ?? this.akuRoot);
         try {
@@ -149,7 +150,7 @@ export class AKUFileStore {
     }
 
     async scanKUFolders() {
-        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.pathGuard.assertRoot();
         await this.assertOwnedPath(this.kuRoot());
         try {
             const entries = await fs.readdir(this.kuRoot(), { withFileTypes: true });
@@ -191,7 +192,7 @@ export class AKUFileStore {
 
     async listPendingTransactions() {
         const pendingDir = path.join(this.akuRoot, PENDING_DIRNAME);
-        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.pathGuard.assertRoot();
         await this.assertOwnedPath(pendingDir);
         try {
             const entries = await fs.readdir(pendingDir, { withFileTypes: true });
@@ -274,7 +275,7 @@ export class AKUFileStore {
     async fileInfo(name) {
         const filePath = this.rootFile(name);
         const content = await this.readText(filePath);
-        const stat = await fs.stat(filePath);
+        const stat = await this.statOwned(filePath);
         const info = {
             sha256: createHash('sha256').update(content).digest('hex'),
             bytes: stat.size,
@@ -286,17 +287,17 @@ export class AKUFileStore {
     }
 
     async assertOwnedPath(filePath) {
-        return assertSafePersistencePath(this.akuRoot, filePath);
+        return this.pathGuard.assertPath(filePath);
     }
 
     async statOwned(filePath) {
-        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.pathGuard.assertRoot();
         await this.assertOwnedPath(filePath);
         return fs.stat(filePath);
     }
 
     async removeOwned(filePath, options = {}) {
-        await assertSafePersistenceRoot(this.akuRoot, this.rootDir);
+        await this.pathGuard.assertRoot();
         await this.assertOwnedPath(filePath);
         return fs.rm(filePath, options);
     }
