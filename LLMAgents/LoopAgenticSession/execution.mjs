@@ -13,13 +13,13 @@ import {
     buildAgenticSessionPlannerHistory,
 } from './prompts.mjs';
 import { parsePlannerDecisionMarkdown } from './plannerMarkdown.mjs';
+import { preparePrompt } from './preparation.mjs';
 import {
     coerceStructuredToolResult,
     getPendingAwaitingInputTool,
     buildPendingInputDecision,
     isLikelyFreshInstruction,
     getTimestamp,
-    injectContextIntoPrompt,
 } from './utils.mjs';
 
 function debugLog(session, ...args) {
@@ -48,6 +48,7 @@ async function requestDecision(session, userPrompt, turn, stepIndex) {
                     reasoningEffort: session.options.reasoningEffort || null,
                 })
                 : { intent: 'unknown', confidence: 0 };
+            session._ensureNotCancelled();
             const shouldContinuePending = interpretation?.intent === 'accept'
                 || interpretation?.intent === 'cancel'
                 || interpretation?.intent === 'update'
@@ -159,6 +160,7 @@ async function runLoopForPrompt(session, userPrompt, turn) {
     for (let stepIndex = 0; stepIndex < maxStepsPerTurn; stepIndex += 1) {
         session._ensureNotCancelled();
         const decision = await session._requestDecision(userPrompt, turn, stepIndex);
+        session._ensureNotCancelled();
         turn.steps.push({ type: 'planner_decision', decision });
         session._debug('[LoopSession]', 'Planner decision', { stepIndex, decision });
 
@@ -433,58 +435,12 @@ async function newPrompt(session, SessionClass, userPrompt, options = {}) {
         session.options.reasoningEffort = options.reasoningEffort || null;
     }
 
-    if (session.status === SESSION_STATUS_INTERRUPTED) {
-        session.status = SESSION_STATUS_ACTIVE;
-    }
-    const runSignal = options.signal || session.options.signal || null;
-    const promptSignal = session._createPromptAbortController(runSignal);
-
-    try {
-        await session._compressHistoryIfNeeded(userPrompt);
-    } catch (error) {
-        if (session._isAbortError(error) || session.status === SESSION_STATUS_INTERRUPTED) {
-            throw error;
-        }
-        session._debug('[LoopSession]', 'History compression failed; continuing without compression', {
-            error: error?.message || String(error),
-        });
-    }
-
-    if (session.preparation?.text) {
-        const preparationTools = session.preparation?.tools && typeof session.preparation.tools === 'object'
-            ? session.preparation.tools
-            : session._userTools;
-        const prepResult = await SessionClass.runPreparation({
-            agent: session.agent,
-            tools: preparationTools,
-            options: {
-                model: session.options.model,
-                tags: session.options.tags,
-                reasoningEffort: session.options.reasoningEffort,
-                maxStepsPerTurn: session.options.maxStepsPerTurn,
-                supervisor: session.supervisor,
-                signal: promptSignal,
-                parentContext: session.preparation.parentContext || null,
-                preparationContext: session.preparation.context || '',
-            },
-            preparationText: session.preparation.text,
-            userPrompt,
-            retries: session.preparation.retries ?? 1,
-        });
-        const contextLines = prepResult?.contextLines || [];
-        session.systemPrompt = injectContextIntoPrompt(session.baseSystemPrompt, contextLines);
-        userPrompt = injectContextIntoPrompt(userPrompt, contextLines);
-    }
-
     const expected = typeof options.expected === 'string' || typeof options.expected === 'number'
         ? String(options.expected)
         : null;
     const maxRetries = Number.isFinite(options.maxRetries)
         ? options.maxRetries
         : session.options.maxRetriesPerTurn;
-
-    debugLog(session, `[${getTimestamp()}] [LoopSession] New prompt: "${userPrompt}"`);
-    session._debug('[LoopSession]', 'New prompt', { prompt: userPrompt, expected });
 
     const turn = {
         prompt: userPrompt,
@@ -502,12 +458,19 @@ async function newPrompt(session, SessionClass, userPrompt, options = {}) {
         failed: false,
     };
     session.turns.push(turn);
-    turn.userHistoryEntry = { type: 'user', prompt: userPrompt };
-    session.history.push(turn.userHistoryEntry);
     session.status = SESSION_STATUS_RUNNING;
+    const runSignal = options.signal || session.options.signal || null;
+    const promptSignal = session._createPromptAbortController(runSignal);
 
     let answer = null;
     try {
+        userPrompt = await preparePrompt(session, SessionClass, userPrompt, promptSignal);
+        session._ensureNotCancelled();
+        turn.prompt = userPrompt;
+        turn.userHistoryEntry = { type: 'user', prompt: userPrompt };
+        session.history.push(turn.userHistoryEntry);
+        debugLog(session, `[${getTimestamp()}] [LoopSession] New prompt: "${userPrompt}"`);
+        session._debug('[LoopSession]', 'New prompt', { prompt: userPrompt, expected });
         answer = await session._runLoopForPrompt(userPrompt, turn);
         session.lastAnswer = answer;
     } catch (error) {

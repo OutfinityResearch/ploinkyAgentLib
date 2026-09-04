@@ -4,6 +4,7 @@ import {
     coerceResultToText,
     getTimestamp,
     runWithRetry,
+    injectContextIntoPrompt,
 } from './utils.mjs';
 import {
     SESSION_STATUS_AWAITING_INPUT,
@@ -90,7 +91,7 @@ async function runPreparation({
         debugLog(logger, `[${getTimestamp()}] [LoopSession] Preparation session start`, {
             promptLength: String(preparationPrompt || '').length,
         });
-        await session.newPrompt(preparationPrompt);
+        await session.newPrompt(preparationPrompt, { signal: options.signal });
         if (session.status === SESSION_STATUS_AWAITING_INPUT) {
             debugLog(logger, `[${getTimestamp()}] [LoopSession] Preparation awaiting input`, {
                 status: session.status,
@@ -98,7 +99,9 @@ async function runPreparation({
             throw new Error('Preparation cannot continue because a preparation tool requested user input.');
         }
         if (session.status === SESSION_STATUS_INTERRUPTED) {
-            throw new Error('Preparation loop interrupted.');
+            const error = new Error('Preparation loop interrupted.');
+            error.name = 'AbortError';
+            throw error;
         }
         const resultText = coerceResultToText(session.getLastResult());
         const contextEntries = parseContextVariables(resultText, contextPrefix);
@@ -114,9 +117,51 @@ async function runPreparation({
     return runWithRetry(attemptRun, retries);
 }
 
+async function preparePrompt(session, SessionClass, userPrompt, promptSignal) {
+    session._ensureNotCancelled();
+    try {
+        await session._compressHistoryIfNeeded(userPrompt);
+    } catch (error) {
+        if (session._isAbortError(error) || session.status === SESSION_STATUS_INTERRUPTED) {
+            throw error;
+        }
+        session._debug('[LoopSession]', 'History compression failed; continuing without compression', {
+            error: error?.message || String(error),
+        });
+    }
+    session._ensureNotCancelled();
+
+    if (!session.preparation?.text) return userPrompt;
+    const preparationTools = session.preparation?.tools && typeof session.preparation.tools === 'object'
+        ? session.preparation.tools
+        : session._userTools;
+    const prepResult = await SessionClass.runPreparation({
+        agent: session.agent,
+        tools: preparationTools,
+        options: {
+            model: session.options.model,
+            tags: session.options.tags,
+            reasoningEffort: session.options.reasoningEffort,
+            maxStepsPerTurn: session.options.maxStepsPerTurn,
+            supervisor: session.supervisor,
+            signal: promptSignal,
+            parentContext: session.preparation.parentContext || null,
+            preparationContext: session.preparation.context || '',
+        },
+        preparationText: session.preparation.text,
+        userPrompt,
+        retries: session.preparation.retries ?? 1,
+    });
+    session._ensureNotCancelled();
+    const contextLines = prepResult?.contextLines || [];
+    session.systemPrompt = injectContextIntoPrompt(session.baseSystemPrompt, contextLines);
+    return injectContextIntoPrompt(userPrompt, contextLines);
+}
+
 export {
     PREPARATION_CONTEXT_PREFIX,
     parseContextVariables,
     buildContextPieceLines,
     runPreparation,
+    preparePrompt,
 };

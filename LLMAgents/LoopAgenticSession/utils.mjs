@@ -126,6 +126,7 @@ async function runWithRetry(fn, retries = 1) {
         try {
             return await fn();
         } catch (error) {
+            if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;
             lastError = error;
         }
     }

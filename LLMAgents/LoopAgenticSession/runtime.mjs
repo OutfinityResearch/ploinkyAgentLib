@@ -191,23 +191,29 @@ function createPromptAbortController(session, externalSignal = null) {
     session._currentAbortSignal = controller.signal;
     session._cancelReason = null;
     if (externalSignal && typeof externalSignal.addEventListener === 'function') {
-        externalSignal.addEventListener('abort', () => {
+        const onAbort = () => {
+            if (session._currentAbortController !== controller) return;
             const externalReason = externalSignal.reason;
             session.cancel(typeof externalReason === 'string' && externalReason.trim()
                 ? externalReason
                 : 'external-signal');
-        }, { once: true });
+        };
+        externalSignal.addEventListener('abort', onAbort, { once: true });
+        session._removePromptAbortListener = () => externalSignal.removeEventListener?.('abort', onAbort);
+        if (externalSignal.aborted) onAbort();
     }
     return controller.signal;
 }
 
 function clearPromptAbortController(session) {
+    session._removePromptAbortListener?.();
+    session._removePromptAbortListener = null;
     session._currentAbortController = null;
     session._currentAbortSignal = null;
 }
 
 function ensureNotCancelled(session) {
-    if (session.status !== SESSION_STATUS_INTERRUPTED) {
+    if (session.status !== SESSION_STATUS_INTERRUPTED && !session._currentAbortSignal?.aborted) {
         return;
     }
     const error = new Error(session._cancelReason || 'Operation cancelled.');
@@ -307,6 +313,7 @@ async function executeTool(session, toolName, prompt) {
             session._debug('[LoopSession]', 'Tool approved via alwaysApprove cache', { tool: toolName });
         } else {
             const decision = normalizeSupervisorDecision(await session.supervisor.approve(toolChoice));
+            session._ensureNotCancelled();
 
             if (decision.decision === 'alwaysApprove') {
                 supervisorApproval = decision.approval || null;
@@ -339,6 +346,7 @@ async function executeTool(session, toolName, prompt) {
         }
     }
 
+    session._ensureNotCancelled();
     let result;
     if (supervisorDeniedResult !== null) {
         result = supervisorDeniedResult;

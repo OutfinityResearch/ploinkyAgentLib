@@ -117,6 +117,7 @@ class LoopAgentSession {
         this.debugLogger = options.logger || null;
         this._currentAbortController = null;
         this._currentAbortSignal = null;
+        this._removePromptAbortListener = null;
         this._cancelReason = null;
     }
 
